@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.5.1';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -880,6 +880,17 @@ function importGpx(text) {
   }
   toast(`GPX: ${np} точок, ${pts.length > 1 ? 1 : 0} трек`, 'good');
 }
+$('#exitBtn').onclick = async () => {
+  if (S.track) {
+    if (!(await confirmBox('Вийти з додатка?', `Триває запис: ${fmtDist(S.track.dist)}. Трек збережеться в історії.`, 'Зберегти і вийти'))) return;
+    const tr = S.track; tr.end = Date.now();
+    if (tr.pts.length > 1) { S.tracks.unshift(tr); S.tracks = S.tracks.slice(0, 40); LS.set('tracks', S.tracks); }
+    S.track = null; saveTrack(true); trackLine.setLatLngs([]); updateTrackBtn();
+  }
+  wake(false); closeSheet();
+  try { window.close(); } catch (e) { /* */ }
+  setTimeout(() => toast('Закрий вікно свайпом або кнопкою «Назад» — дані збережено', 'good'), 400);
+};
 $('#updateBtn').onclick = checkUpdate;
 async function checkUpdate() {
   const sub = $('#updSub');
