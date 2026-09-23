@@ -1,13 +1,13 @@
 /* WayBack service worker: офлайн-оболонка + кеш плиток карти */
-const VERSION = 'wayback-v1.0.1';
+const VERSION = 'wayback-v1.1.0';
 const TILE_CACHE = 'wayback-tiles';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'leaflet.js', 'leaflet.css',
 ];
-const OPTIONAL = ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
+const OPTIONAL = ['icon-192-1.png', 'icon-512-1.png', 'icon-maskable-512.png'];
 const TILE_HOSTS = /(^|\.)(tile\.openstreetmap\.org|tile\.opentopomap\.org|arcgisonline\.com|basemaps\.cartocdn\.com)$/;
-const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://');
+const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(VERSION)
@@ -36,7 +36,10 @@ self.addEventListener('fetch', (e) => {
       const hit = await cache.match(key);
       if (hit) return hit;
       try {
-        const res = await fetch(req);
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 9000); // не чекати вічно на повільний сервер
+        const res = await fetch(req.url, { mode: 'cors', credentials: 'omit', signal: ctl.signal });
+        clearTimeout(timer);
         if (res.ok) cache.put(key, res.clone());
         return res;
       } catch (err) {

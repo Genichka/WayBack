@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.0.1';
+const APP_VERSION = '1.1.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -13,22 +13,22 @@ const LS = {
 
 /* ---------- map layers ---------- */
 const LAYERS = {
+  osm: { name: 'Схема', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, dl: false,
+    attr: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
   topo: { name: 'Топо', url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', sub: 'abc', max: 17, dl: true,
     attr: '© <a href="https://www.openstreetmap.org/copyright">OSM</a>, SRTM | © <a href="https://opentopomap.org">OpenTopoMap</a>' },
   sat: { name: 'Супутник', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', max: 18, dl: true,
     attr: '© Esri, Maxar, Earthstar Geographics' },
-  osm: { name: 'Схема', url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png', max: 19, dl: false,
-    attr: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>' },
   dark: { name: 'Темна', url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png', sub: 'abcd', max: 19, dl: true,
     attr: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> © <a href="https://carto.com/">CARTO</a>' },
 };
 const TILE_CACHE = 'wayback-tiles';
-const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://');
+const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 
 /* ---------- state ---------- */
-const DEF_SETTINGS = { layer: 'topo', theme: 'dark', wake: true, vibrate: true, auto: true, radius: 2, zmax: 16 };
+const DEF_SETTINGS = { v: 2, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, radius: 2, zmax: 16 };
 const S = {
-  settings: Object.assign({}, DEF_SETTINGS, LS.get('settings', {})),
+  settings: (() => { const st = Object.assign({}, DEF_SETTINGS, LS.get('settings', {})); if (!(st.v >= 2)) { st.v = 2; st.layer = 'osm'; } return st; })(),
   points: LS.get('points', []),
   targetId: LS.get('target', null),
   track: LS.get('track', null),        // активний трек {id,start,pts:[[lat,lon,t,acc,alt]],dist}
@@ -101,14 +101,59 @@ applyTheme();
 
 /* ---------- map ---------- */
 const view = LS.get('view', { c: [49.0, 31.3], z: 6 });
-const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 19, tap: true }).setView(view.c, view.z);
+const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 19, preferCanvas: true, fadeAnimation: true }).setView(view.c, view.z);
 let baseLayer = null;
+
+/* Шар плиток з повторами і запасним показом: якщо плитка не прийшла — ще 3 спроби
+   (з іншим піддоменом), далі показуємо збільшену плитку з меншого масштабу (з кешу/мережі).
+   Завдяки цьому немає порожніх квадратів ні онлайн, ні офлайн. */
+const FastTiles = L.TileLayer.extend({
+  createTile(coords, done) {
+    const wrap = document.createElement('div');
+    wrap.className = 'wb-tile';
+    const img = document.createElement('img');
+    img.alt = ''; img.decoding = 'async'; img.draggable = false;
+    img.crossOrigin = 'anonymous';
+    wrap.appendChild(img);
+    let tries = 0, finished = false, parentLevel = 0;
+    const finish = (err) => { if (!finished) { finished = true; done(err, wrap); } };
+    img.onload = () => finish(null);
+    img.onerror = () => {
+      if (tries < 3) {
+        tries++;
+        setTimeout(() => { img.src = this._urlFor(coords, tries); }, 300 * tries);
+      } else if (parentLevel < 4 && coords.z - parentLevel > 3) {
+        parentLevel++;
+        this._showParent(img, coords, parentLevel);
+      } else finish(new Error('tile'));
+    };
+    img.src = this._urlFor(coords, 0);
+    return wrap;
+  },
+  _urlFor(c, attempt) {
+    const subs = this.options.subdomains;
+    const data = { x: c.x, y: c.y, z: this._getZoomForUrl(), s: subs[(Math.abs(c.x + c.y) + attempt) % subs.length], r: '' };
+    const url = L.Util.template(this._url, L.Util.extend(data, this.options));
+    return attempt && subs.length < 2 ? url + '?r=' + attempt : url;
+  },
+  _showParent(img, c, k) {
+    const z = this._getZoomForUrl() - k, f = 1 << k;
+    const px = Math.floor(c.x / f), py = Math.floor(c.y / f);
+    const ts = this.getTileSize().x;
+    const url = L.Util.template(this._url, L.Util.extend({ x: px, y: py, z, s: this.options.subdomains[0], r: '' }, this.options));
+    img.style.width = img.style.height = ts * f + 'px';
+    img.style.left = -(c.x - px * f) * ts + 'px';
+    img.style.top = -(c.y - py * f) * ts + 'px';
+    img.src = url;
+  },
+});
+
 function setLayer(id) {
-  const l = LAYERS[id] || LAYERS.topo;
+  const l = LAYERS[id] || LAYERS.osm;
   if (baseLayer) map.removeLayer(baseLayer);
-  baseLayer = L.tileLayer(l.url, {
+  baseLayer = new FastTiles(l.url, {
     subdomains: l.sub || 'abc', maxNativeZoom: l.max, maxZoom: 19, attribution: l.attr,
-    crossOrigin: 'anonymous', keepBuffer: 3,
+    keepBuffer: 4, updateWhenZooming: false, updateWhenIdle: false,
   }).addTo(map);
   S.settings.layer = id; saveSettings();
 }
