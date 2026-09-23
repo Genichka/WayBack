@@ -1,5 +1,5 @@
 /* WayBack service worker: офлайн-оболонка + кеш плиток карти */
-const VERSION = 'wayback-v1.3.1';
+const VERSION = 'wayback-v1.4.0';
 const TILE_CACHE = 'wayback-tiles';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
@@ -49,20 +49,31 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // файли додатку: з кешу одразу, оновлення у фоні
+  // файли додатку: спершу мережа (щоб оновлення з'являлось одразу),
+  // але не довше 3.5 с — далі кеш. Без мережі — завжди кеш.
   if (url.origin === self.location.origin) {
+    // запити з ?t=... — це перевірка оновлення, повз кеш
+    if (url.search) { e.respondWith(fetch(req).catch(() => new Response('', { status: 504 }))); return; }
     e.respondWith((async () => {
       const cache = await caches.open(VERSION);
-      const hit = await cache.match(req, { ignoreSearch: true });
-      const net = fetch(req).then((res) => {
-        if (res.ok) cache.put(req, res.clone());
-        return res;
-      }).catch(() => null);
-      if (hit) { e.waitUntil(net); return hit; }
-      const res = await net;
-      if (res) return res;
-      if (req.mode === 'navigate') return cache.match('index.html');
-      return new Response('', { status: 504 });
+      const cached = () => cache.match(req, { ignoreSearch: true })
+        .then((r) => r || (req.mode === 'navigate' ? cache.match('index.html') : null));
+      if (!navigator.onLine) {
+        const hit = await cached();
+        if (hit) return hit;
+      }
+      try {
+        const ctl = new AbortController();
+        const timer = setTimeout(() => ctl.abort(), 3500);
+        const res = await fetch(new Request(req.url, { cache: 'reload' }), { signal: ctl.signal });
+        clearTimeout(timer);
+        if (res && res.ok) { cache.put(req, res.clone()); return res; }
+        throw new Error('bad status');
+      } catch (err) {
+        const hit = await cached();
+        if (hit) return hit;
+        return new Response('', { status: 504 });
+      }
     })());
   }
 });

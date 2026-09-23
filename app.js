@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.3.1';
+const APP_VERSION = '1.4.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -831,7 +831,8 @@ $('#fabLayer').onclick = () => {
 function renderSettings() {
   seg($('#themeSeg'), [['dark', 'Темна'], ['light', 'Світла']], S.settings.theme, (v) => { S.settings.theme = v; saveSettings(); applyTheme(); });
   $('#setWake').checked = S.settings.wake; $('#setVib').checked = S.settings.vibrate; $('#setAuto').checked = S.settings.auto;
-  $('#verNote').textContent = `WayBack v${APP_VERSION}`;
+  $('#updSub').textContent = `Версія ${APP_VERSION}`;
+  $('#verNote').textContent = `WayBack v${APP_VERSION} · дані зберігаються лише на цьому пристрої`;
 }
 $('#setWake').onchange = (e) => { S.settings.wake = e.target.checked; saveSettings(); if (!e.target.checked) wake(false); else if (S.track || S.navOpen) wake(true); };
 $('#setVib').onchange = (e) => { S.settings.vibrate = e.target.checked; saveSettings(); };
@@ -872,14 +873,29 @@ function importGpx(text) {
   }
   toast(`GPX: ${np} точок, ${pts.length > 1 ? 1 : 0} трек`, 'good');
 }
-$('#updateBtn').onclick = async () => {
-  if (!('serviceWorker' in navigator)) return;
-  const reg = await navigator.serviceWorker.getRegistration();
-  if (!reg) { toast('Офлайн-режим ще не активний'); return; }
-  try { await reg.update(); } catch (e) { toast('Немає звʼязку з сервером', 'warn'); return; }
-  if (reg.installing || reg.waiting) { toast('Оновлення знайдено — перезапускаю…', 'good'); setTimeout(() => location.reload(), 1500); }
-  else toast('У тебе остання версія ✓', 'good');
-};
+$('#updateBtn').onclick = checkUpdate;
+async function checkUpdate() {
+  const sub = $('#updSub');
+  if (!navigator.onLine) { sub.textContent = `Версія ${APP_VERSION} · немає інтернету`; toast('Немає інтернету — оновлення потребує звʼязку', 'warn'); return; }
+  sub.textContent = 'Перевіряю…';
+  let remote = null;
+  try {
+    const r = await fetch('app.js?t=' + Date.now(), { cache: 'no-store' });
+    const m = (await r.text()).match(/APP_VERSION\s*=\s*'([^']+)'/);
+    remote = m && m[1];
+  } catch (e) { /* немає звʼязку */ }
+  if (!remote) { sub.textContent = `Версія ${APP_VERSION} · не вдалося перевірити`; toast('Не вдалося перевірити оновлення', 'warn'); return; }
+  if (remote === APP_VERSION) { sub.textContent = `Версія ${APP_VERSION} — остання ✓`; toast('У тебе остання версія ✓', 'good'); return; }
+  sub.textContent = `Є версія ${remote} — оновлюю…`;
+  toast(`⬇️ Оновлення ${remote} — перезапускаю…`, 'good');
+  try {
+    const keys = await caches.keys();
+    await Promise.all(keys.filter((k) => k !== TILE_CACHE).map((k) => caches.delete(k))); // карти лишаємо
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (reg) await reg.update();
+  } catch (e) { /* */ }
+  setTimeout(() => location.reload(), 1000);
+}
 
 /* ---------- sheet ---------- */
 function openSheet(tab) {
