@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.4.0';
+const APP_VERSION = '1.5.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -747,7 +747,7 @@ function tileList(lat, lon, rKm, zmin, zmax) {
   return out;
 }
 function tileUrl(l, z, x, y) { return l.url.replace('{s}', (l.sub || 'a')[0]).replace('{z}', z).replace('{x}', x).replace('{y}', y); }
-const MAX_TILES = 5000;
+const MAX_TILES = 25000;
 function dlPlan() {
   const l = LAYERS[S.settings.layer], c = map.getCenter();
   const zmax = Math.min(S.settings.zmax, l.max);
@@ -758,8 +758,15 @@ function updateDlInfo() {
   const { l, list, zmax } = dlPlan();
   const btn = $('#dlBtn');
   if (!l.dl) { $('#dlInfo').innerHTML = `Шар «${l.name}» (OpenStreetMap) не дозволяє масове завантаження. Обери «Топо» або «Супутник».`; btn.disabled = true; return; }
-  const mb = (list.length * (S.settings.layer === 'sat' ? 22 : 14) / 1024).toFixed(0);
-  $('#dlInfo').innerHTML = `Шар <b>${l.name}</b>, масштаб 11–${zmax}: <b>${list.length}</b> плиток ≈ ${mb} МБ` + (list.length > MAX_TILES ? `<br><span class="c-red">Забагато (ліміт ${MAX_TILES}) — зменш радіус або деталізацію.</span>` : '');
+  const perTile = S.settings.layer === 'sat' ? 22 : 14; // приблизно, КБ
+  const mb = list.length * perTile / 1024;
+  const mins = Math.ceil(list.length / 6 / 60); // ~6 плиток/с
+  const size = mb < 1000 ? `${mb.toFixed(mb < 10 ? 1 : 0)} МБ` : `${(mb / 1024).toFixed(1)} ГБ`;
+  let note = '';
+  if (list.length > MAX_TILES) note = `<br><span class="c-red">Забагато (ліміт ${MAX_TILES}) — зменш радіус або деталізацію.</span>`;
+  else if (list.length > 6000) note = `<br><span class="c-yellow">Це надовго (~${mins} хв) — краще по Wi-Fi і з зарядкою.</span>`;
+  else if (list.length > 1500) note = `<br>Орієнтовно ${mins} хв.`;
+  $('#dlInfo').innerHTML = `Шар <b>${l.name}</b>, ${S.settings.radius} км, масштаб 11–${zmax}: <b>${list.length}</b> плиток ≈ ${size}${note}`;
   btn.disabled = list.length > MAX_TILES || dlState.running;
 }
 const dlState = { running: false, cancel: false };
@@ -791,7 +798,7 @@ async function downloadArea() {
       }
     }
   };
-  await Promise.all(Array.from({ length: 6 }, worker));
+  await Promise.all(Array.from({ length: 8 }, worker));
   dlState.running = false;
   $('#dlCancel').classList.add('hidden'); $('#dlBtn').disabled = false;
   toast(dlState.cancel ? 'Завантаження зупинено' : fail ? `Готово, але ${fail} плиток не вдалося` : '✅ Район збережено для офлайну', fail ? 'warn' : 'good');
@@ -817,7 +824,7 @@ function seg(el, items, cur, onPick) {
 }
 function renderMapTab() {
   seg($('#layerSeg'), Object.entries(LAYERS).map(([k, l]) => [k, l.name]), S.settings.layer, (v) => { setLayer(v); updateDlInfo(); });
-  seg($('#radiusSeg'), [[1, '1 км'], [2, '2 км'], [3, '3 км'], [5, '5 км']], S.settings.radius, (v) => { S.settings.radius = +v; saveSettings(); updateDlInfo(); });
+  seg($('#radiusSeg'), [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [10, '10'], [15, '15'], [25, '25 км']], S.settings.radius, (v) => { S.settings.radius = +v; saveSettings(); updateDlInfo(); });
   seg($('#zoomSeg'), [[15, 'Базова'], [16, 'Добра'], [17, 'Макс']], S.settings.zmax, (v) => { S.settings.zmax = +v; saveSettings(); updateDlInfo(); });
   updateDlInfo(); updateCacheSize();
 }
