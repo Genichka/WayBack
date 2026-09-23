@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.1.0';
+const APP_VERSION = '1.3.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -398,13 +398,109 @@ async function deletePoint(id) {
   if (S.targetId === id) S.targetId = S.points.length ? S.points[S.points.length - 1].id : null;
   savePoints(); renderPoints(); renderPointList(); updateAll();
 }
+/* ---------- поділитись (Telegram, Viber, SMS…) ---------- */
+const appLink = (lat, lon, name) => `${location.origin}${location.pathname}?to=${lat.toFixed(6)},${lon.toFixed(6)}&n=${encodeURIComponent(name)}`;
+function shareText(title, lat, lon, extra) {
+  return `${title}${extra ? ' ' + extra : ''}\n${fmtCoord(lat, lon)}\n\n🗺 Google Maps: https://maps.google.com/?q=${lat.toFixed(6)},${lon.toFixed(6)}\n🧭 Вести в WayBack: ${appLink(lat, lon, title.replace(/^\S+\s/, ''))}`;
+}
+function shareDialog(title, lat, lon, text) {
+  const link = appLink(lat, lon, title.replace(/^\S+\s/, ''));
+  modal({
+    title, ok: 'Закрити', cancel: null,
+    html: `<div class="qr-box"><canvas id="qrC"></canvas></div>
+      <p class="note" style="text-align:center;margin:6px 0 0">Хай друг наведе камеру — точка стане в нього ціллю.<br>Працює без інтернету.</p>
+      <div class="row-btns">
+        <button class="btn primary" data-a="send">📤 Надіслати</button>
+        <button class="btn" data-a="scan">📷 Сканувати</button>
+      </div>`,
+    onOpen: (b) => {
+      try { QR.draw(b.querySelector('#qrC'), link, { scale: 6, quiet: 3 }); }
+      catch (e) { b.querySelector('.qr-box').innerHTML = '<p class="note">QR не вміщається</p>'; }
+      b.onclick = (e) => {
+        const a = e.target.closest('[data-a]'); if (!a) return;
+        if (a.dataset.a === 'send') shareSend(title, text);
+        else { $('#mOk').click(); setTimeout(scanQr, 60); }
+      };
+    },
+  });
+}
+
+/* ---------- сканер QR (камера, офлайн) ---------- */
+async function scanQr() {
+  if (!('BarcodeDetector' in window)) {
+    toast('Сканер тут недоступний — відкрий код камерою телефона', 'warn'); return;
+  }
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } }); }
+  catch (e) { toast('Немає доступу до камери', 'warn'); return; }
+  const ov = document.createElement('div');
+  ov.className = 'scan';
+  ov.innerHTML = '<video playsinline muted></video><div class="scan-frame"></div>'
+    + '<div class="scan-hint">Наведи на QR-код</div><button class="btn" id="scanX">Скасувати</button>';
+  document.body.appendChild(ov);
+  const v = ov.querySelector('video');
+  v.srcObject = stream; v.muted = true; v.playsInline = true;
+  let stopped = false;
+  const close = () => { stopped = true; stream.getTracks().forEach((t) => t.stop()); ov.remove(); };
+  ov.querySelector('#scanX').onclick = close;
+  const det = new BarcodeDetector({ formats: ['qr_code'] });
+  const loop = async () => {
+    if (stopped) return;
+    try {
+      const codes = await det.detect(v);
+      if (codes && codes.length) { const val = codes[0].rawValue; close(); acceptScanned(val); return; }
+    } catch (e) { /* кадр не розпізнано */ }
+    setTimeout(loop, 150);
+  };
+  try { await v.play(); } catch (e) { /* */ }
+  loop();
+}
+function acceptScanned(text) {
+  let c = null, name = 'Точка від друга';
+  try {
+    const u = new URL(text, location.href);
+    if (u.searchParams.get('to')) { c = parseCoords(u.searchParams.get('to')); name = u.searchParams.get('n') || name; }
+    else if (u.searchParams.get('q')) c = parseCoords(u.searchParams.get('q'));
+  } catch (e) { /* не URL */ }
+  if (!c && /^geo:/i.test(text)) c = parseCoords(text.slice(4));
+  if (!c) c = parseCoords(text);
+  if (!c) { toast('Це не схоже на точку', 'warn'); return; }
+  const p = addPoint({ name: name.slice(0, 40), icon: '👤', lat: c.lat, lon: c.lon }, true);
+  setTarget(p.id); setFollow(false); S.firstFix = false;
+  map.setView([p.lat, p.lon], 16);
+  vibrate([60, 60, 60]);
+  toast(`🎯 Прийнято: ${p.name} — тисни «Назад»`, 'good');
+}
+
+async function shareSend(title, text) {
+  try {
+    if (navigator.share) { await navigator.share({ title, text }); return; }
+    await navigator.clipboard.writeText(text); toast('Скопійовано — встав у месенджер', 'good');
+  } catch (e) { /* скасовано */ }
+}
 async function sharePoint(id) {
   const p = S.points.find((x) => x.id === id); if (!p) return;
-  const text = `${p.icon} ${p.name}: ${fmtCoord(p.lat, p.lon)}\nhttps://maps.google.com/?q=${p.lat},${p.lon}`;
-  try {
-    if (navigator.share) { await navigator.share({ title: p.name, text }); return; }
-    await navigator.clipboard.writeText(text); toast('Координати скопійовано', 'good');
-  } catch (e) { /* скасовано */ }
+  shareDialog(`${p.icon} ${p.name}`, p.lat, p.lon, shareText(`${p.icon} ${p.name}`, p.lat, p.lon));
+}
+function shareHere() {
+  if (S.gpsDenied) { gpsHelp(); return; }
+  if (!S.pos) { toast('Ще немає сигналу GPS', 'warn'); return; }
+  const when = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+  const txt = shareText('📍 Я тут', S.pos.lat, S.pos.lon, `(${when}, ±${Math.round(S.pos.acc)} м)`);
+  shareDialog('📍 Я тут', S.pos.lat, S.pos.lon, txt);
+}
+// відкрили посилання від друга: ?to=lat,lon&n=Назва → точка-ціль
+function handleIncomingLink() {
+  const q = new URLSearchParams(location.search), to = q.get('to');
+  if (!to) return;
+  history.replaceState(null, '', location.pathname);
+  const c = parseCoords(to); if (!c) return;
+  const name = (q.get('n') || 'Точка від друга').slice(0, 40);
+  let p = S.points.find((x) => Math.abs(x.lat - c.lat) < 1e-5 && Math.abs(x.lon - c.lon) < 1e-5);
+  if (!p) p = addPoint({ name, icon: '👤', lat: c.lat, lon: c.lon }, true);
+  setTarget(p.id); setFollow(false); S.firstFix = false;
+  map.setView([p.lat, p.lon], 16);
+  toast(`🎯 Ціль: ${p.name} — натисни «Назад», щоб іти`, 'good');
 }
 function pointActions(id) {
   const p = S.points.find((x) => x.id === id); if (!p) return;
@@ -725,6 +821,7 @@ function renderMapTab() {
   seg($('#zoomSeg'), [[15, 'Базова'], [16, 'Добра'], [17, 'Макс']], S.settings.zmax, (v) => { S.settings.zmax = +v; saveSettings(); updateDlInfo(); });
   updateDlInfo(); updateCacheSize();
 }
+$('#shareBtn').onclick = shareHere;
 $('#fabLayer').onclick = () => {
   const keys = Object.keys(LAYERS), next = keys[(keys.indexOf(S.settings.layer) + 1) % keys.length];
   setLayer(next); toast('Карта: ' + LAYERS[next].name);
@@ -802,6 +899,7 @@ $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) showT
 $('#sheet').onclick = (e) => { if (e.target.closest('[data-close]')) closeSheet(); };
 $('#menuBtn').onclick = () => openSheet();
 $('#addHereBtn').onclick = () => { closeSheet(); markHere(); };
+$('#scanBtn').onclick = () => { closeSheet(); setTimeout(scanQr, 120); };
 $('#addCoordBtn').onclick = () => { closeSheet(); newPointDialog(0, 0, { coords: true }); };
 
 /* ---------- buttons ---------- */
@@ -837,6 +935,7 @@ if (S.track) {
 updateTrackBtn();
 updateAll();
 setFollow(true);
+handleIncomingLink();
 startGps();
 if (!needsCompassPermission()) bindCompass();
 

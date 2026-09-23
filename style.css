@@ -140,7 +140,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* bottom bar */
 .bottom {
-  display: grid; grid-template-columns: 1fr 1.25fr 1fr; gap: 6px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
+  display: grid; grid-template-columns: 1fr 1.2fr 1fr 1fr; gap: 6px; padding: 6px 6px calc(6px + env(safe-area-inset-bottom));
   background: var(--panel); border-top: 1px solid var(--border);
 }
 .bbtn {
@@ -277,3 +277,15 @@ button { font: inherit; color: inherit; cursor: pointer; }
   .stats { grid-template-columns: repeat(4, 1fr); }
   .p-val { font-size: 26px; }
 }
+
+/* QR і сканер */
+.qr-box { display: flex; justify-content: center; background: #fff; border-radius: 6px; padding: 8px; }
+.qr-box canvas { width: 100%; max-width: 250px; height: auto; image-rendering: pixelated; }
+.scan { position: fixed; inset: 0; z-index: 1300; background: #000; display: flex; align-items: center; justify-content: center; }
+.scan video { width: 100%; height: 100%; object-fit: cover; }
+.scan-frame {
+  position: absolute; width: min(68vw, 300px); aspect-ratio: 1; border: 3px solid var(--green);
+  border-radius: 12px; box-shadow: 0 0 0 100vmax rgba(0, 0, 0, .55);
+}
+.scan-hint { position: absolute; top: calc(50% + min(34vw, 150px) + 20px); color: #fff; font-size: 14px; text-shadow: 0 1px 4px #000; }
+.scan #scanX { position: absolute; bottom: calc(28px + env(safe-area-inset-bottom)); background: var(--panel); }

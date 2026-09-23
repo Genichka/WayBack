@@ -1,9 +1,9 @@
 /* WayBack service worker: офлайн-оболонка + кеш плиток карти */
-const VERSION = 'wayback-v1.1.0';
+const VERSION = 'wayback-v1.3.0';
 const TILE_CACHE = 'wayback-tiles';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
-  'leaflet.js', 'leaflet.css',
+  'leaflet.js', 'leaflet.css', 'qr.js',
 ];
 const OPTIONAL = ['icon-192-1.png', 'icon-512-1.png', 'icon-maskable-512.png'];
 const TILE_HOSTS = /(^|\.)(tile\.openstreetmap\.org|tile\.opentopomap\.org|arcgisonline\.com|basemaps\.cartocdn\.com)$/;

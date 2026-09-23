@@ -11,8 +11,8 @@
 <meta name="application-name" content="WayBack">
 <title>WayBack — повернись на точку</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="icon" href="icon-192-1.png">
+<link rel="apple-touch-icon" href="icon-192-1.png">
 <link rel="stylesheet" href="leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -91,6 +91,7 @@
   <button class="bbtn" id="markBtn"><span class="ico">📍</span><span>Позначити</span></button>
   <button class="bbtn primary" id="trackBtn"><span class="ico" id="trackIco">▶</span><span id="trackTxt">Старт</span></button>
   <button class="bbtn" id="navBtn"><span class="ico">🧭</span><span>Назад</span></button>
+  <button class="bbtn" id="shareBtn"><span class="ico">📤</span><span>Поділитись</span></button>
 </nav>
 
 <!-- menu sheet -->
@@ -113,6 +114,7 @@
       <div class="row-btns">
         <button class="btn" id="addHereBtn">📍 Тут, де я</button>
         <button class="btn" id="addCoordBtn">⌨️ За координатами</button>
+        <button class="btn" id="scanBtn">📷 Сканувати QR</button>
       </div>
       <p class="note">Довге натискання на карті — додати точку в тому місці.</p>
     </div>
@@ -192,6 +194,7 @@
 <div class="toast hidden" id="toast"></div>
 
 <script src="leaflet.js"></script>
+<script src="qr.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
