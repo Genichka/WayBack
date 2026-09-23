@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.0.0';
+const APP_VERSION = '1.0.1';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -164,14 +164,40 @@ function onPos(p) {
   recordPoint();
   updateAll();
 }
+let gpsWatch = null, gpsHelpShown = false;
 function onPosErr(e) {
-  if (e.code === 1) { gpsBadge('bad', 'Немає доступу'); toast('Дозволь доступ до геолокації в налаштуваннях браузера', 'warn'); }
-  else gpsBadge('bad', 'Шукаю…');
+  if (e.code === 1) {
+    S.gpsDenied = true; S.pendingStart = false; updateTrackBtn();
+    gpsBadge('bad', 'Немає доступу');
+    if (!gpsHelpShown) { gpsHelpShown = true; gpsHelp(); }
+  } else gpsBadge('bad', e.code === 2 ? 'Увімкни GPS' : 'Шукаю…');
 }
 function startGps() {
   if (!('geolocation' in navigator)) { gpsBadge('bad', 'Немає GPS'); return; }
-  navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 });
+  if (!window.isSecureContext) { gpsBadge('bad', 'Потрібен HTTPS'); return; }
+  if (gpsWatch != null) navigator.geolocation.clearWatch(gpsWatch);
+  S.gpsDenied = false; gpsBadge('', 'GPS…');
+  gpsWatch = navigator.geolocation.watchPosition(onPos, onPosErr, { enableHighAccuracy: true, maximumAge: 1000, timeout: 30000 });
 }
+// якщо дозвіл змінили в налаштуваннях — одразу підхопити
+try {
+  navigator.permissions.query({ name: 'geolocation' }).then((st) => {
+    st.onchange = () => { if (st.state !== 'denied') { if (!$('#modal').classList.contains('hidden')) $('#mCancel').click(); startGps(); toast('📍 Доступ до GPS є', 'good'); } };
+  });
+} catch (e) { /* */ }
+async function gpsHelp() {
+  const again = await modal({
+    title: '📍 Потрібен доступ до GPS',
+    html: `<div class="note" style="font-size:13px;color:var(--text);line-height:1.5">
+      <b>1. Увімкни місцезнаходження на телефоні</b><br>Шторка зверху → «Місцезнаходження» / «Геодані».<br><br>
+      <b>2. Дозволь сайту</b><br>Chrome: торкнись значка <b>⚙︎/🔒</b> ліворуч від адреси → <b>Дозволи</b> → <b>Місцезнаходження</b> → <b>Дозволити</b>.<br><br>
+      <b>3. Дозволь самому Chrome</b><br>Налаштування Android → Додатки → Chrome → Дозволи → Місцезнаходження → <b>«Під час використання»</b>, і увімкни <b>«Точне місцезнаходження»</b>.<br><br>
+      iPhone: Параметри → Приватність → Служби геолокації → Safari → «Під час використання».</div>`,
+    ok: 'Спробувати ще', cancel: 'Закрити', validate: () => true,
+  });
+  if (again) { startGps(); navigator.geolocation.getCurrentPosition(onPos, onPosErr, { enableHighAccuracy: true, timeout: 20000 }); }
+}
+$('#gpsBadge').onclick = () => (S.gpsDenied || !S.pos ? gpsHelp() : null);
 
 /* ---------- compass ---------- */
 let compassBound = false;
@@ -223,6 +249,7 @@ function recordPoint() {
   saveTrack();
 }
 function startTrack() {
+  if (S.gpsDenied) { gpsHelp(); return; }
   if (!S.pos) { S.pendingStart = true; toast('Чекаю сигнал GPS…'); updateTrackBtn(); return; }
   if (!target() && S.settings.auto) {
     const pt = addPoint({ name: 'Машина', icon: '🚗', lat: S.pos.lat, lon: S.pos.lon }, true);
@@ -308,6 +335,7 @@ async function newPointDialog(lat, lon, opts = {}) {
   if (opts.coords) map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15));
 }
 function markHere() {
+  if (S.gpsDenied) { gpsHelp(); return; }
   if (!S.pos) { toast('Ще немає сигналу GPS', 'warn'); return; }
   if (S.pos.acc > 50) toast(`Точність поки низька (±${Math.round(S.pos.acc)} м)`, 'warn');
   newPointDialog(S.pos.lat, S.pos.lon);

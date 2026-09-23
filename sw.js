@@ -1,16 +1,18 @@
 /* WayBack service worker: офлайн-оболонка + кеш плиток карти */
-const VERSION = 'wayback-v1.0.0';
+const VERSION = 'wayback-v1.0.1';
 const TILE_CACHE = 'wayback-tiles';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
   'leaflet.js', 'leaflet.css',
-  'icon-192.png', 'icon-512.png',
 ];
+const OPTIONAL = ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 const TILE_HOSTS = /(^|\.)(tile\.openstreetmap\.org|tile\.opentopomap\.org|arcgisonline\.com|basemaps\.cartocdn\.com)$/;
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://');
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(VERSION)
+    .then((c) => c.addAll(SHELL).then(() => Promise.all(OPTIONAL.map((u) => c.add(u).catch(() => {})))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
