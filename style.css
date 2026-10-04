@@ -361,11 +361,4 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 
 /* ---- вихід ---- */
-.exit-btn {
-  display: block; width: 100%; margin: 16px 0 0;
-  background: var(--panel); color: var(--red);
-  border: 1px solid var(--border2); border-radius: 4px;
-  padding: 13px; font-size: 14.5px; font-weight: 600;
-}
-.exit-btn:active { background: var(--panel2); }
-.exit-note { text-align: center; margin: 6px 0 4px; }
+#exitBtn { font-size: 17px; }

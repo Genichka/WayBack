@@ -1,5 +1,5 @@
 /* WayBack service worker: офлайн-оболонка + кеш плиток карти */
-const VERSION = 'wayback-v1.9.2';
+const VERSION = 'wayback-v1.9.3';
 const TILE_CACHE = 'wayback-tiles';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
