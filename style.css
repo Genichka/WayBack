@@ -362,3 +362,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* ---- вихід ---- */
 #exitBtn { font-size: 17px; }
+
+
+/* ---- пошук місця ---- */
+.find-res { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.find-item {
+  text-align: left; background: var(--panel2); border: 1px solid var(--border);
+  border-radius: 4px; padding: 9px 10px; font-size: 12.5px; color: var(--text); line-height: 1.4;
+}
+.find-item:active { border-color: var(--blue); }
+.find-ok { background: rgba(115,191,105,.12); border: 1px solid var(--green); border-radius: 4px; padding: 9px 10px; font-size: 13px; color: var(--strong); }
+.find-ok small { color: var(--dim); font-family: Consolas, monospace; }
+.find-err { background: rgba(242,73,92,.1); border: 1px solid var(--red); border-radius: 4px; padding: 9px 10px; font-size: 12.5px; color: var(--text); line-height: 1.45; }
+.find-wait { padding: 9px 10px; font-size: 12.5px; color: var(--dim); }
+
+/* ---- месенджери ---- */
+.msg-row { display: flex; gap: 6px; margin-top: 10px; }
+.btn.msg { flex: 1; color: #fff; border: 0; font-weight: 600; font-size: 13px; padding: 11px 4px; }
+.btn.msg.tg { background: #2aabee; }
+.btn.msg.vb { background: #7360f2; }
+.btn.msg.wa { background: #25d366; }

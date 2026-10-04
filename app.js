@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.9.3';
+const APP_VERSION = '1.10.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -474,14 +474,35 @@ const appLink = (lat, lon, name) => `${location.origin}${location.pathname}?to=$
 function shareText(title, lat, lon, extra) {
   return `${title}${extra ? ' ' + extra : ''}\n${fmtCoord(lat, lon)}\n\n🗺 Google Maps: https://maps.google.com/?q=${lat.toFixed(6)},${lon.toFixed(6)}\n🧭 Вести в WayBack: ${appLink(lat, lon, title.replace(/^\S+\s/, ''))}`;
 }
+/* Відкриває чат у месенджері з готовим текстом.
+   Якщо застосунок не встановлений, браузер нічого не зробить -
+   тому поруч лишаються «Копіювати» і системне «Надіслати». */
+function sendToMessenger(kind, text, link) {
+  const t = encodeURIComponent(text);
+  const urls = {
+    tg: `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${t}`,
+    wa: `https://wa.me/?text=${t}`,
+    vb: `viber://forward?text=${t}`,
+  };
+  const u = urls[kind];
+  if (!u) return;
+  try { window.open(u, '_blank', 'noopener'); }
+  catch (e) { location.href = u; }
+}
 function shareDialog(title, lat, lon, text) {
   const link = appLink(lat, lon, title.replace(/^\S+\s/, ''));
   modal({
     title, ok: 'Закрити', cancel: null,
     html: `<div class="qr-box"><canvas id="qrC"></canvas></div>
       <p class="note" style="text-align:center;margin:6px 0 0">Хай друг наведе камеру — точка стане в нього ціллю.<br>Працює без інтернету.</p>
+      <div class="msg-row">
+        <button class="btn msg tg" data-a="tg">Telegram</button>
+        <button class="btn msg vb" data-a="vb">Viber</button>
+        <button class="btn msg wa" data-a="wa">WhatsApp</button>
+      </div>
       <div class="row-btns">
-        <button class="btn primary" data-a="send">📤 Надіслати</button>
+        <button class="btn primary" data-a="send">📤 Інший застосунок</button>
+        <button class="btn" data-a="copy">📋 Копіювати</button>
         <button class="btn" data-a="scan">📷 Сканувати</button>
       </div>`,
     onOpen: (b) => {
@@ -489,8 +510,16 @@ function shareDialog(title, lat, lon, text) {
       catch (e) { b.querySelector('.qr-box').innerHTML = '<p class="note">QR не вміщається</p>'; }
       b.onclick = (e) => {
         const a = e.target.closest('[data-a]'); if (!a) return;
-        if (a.dataset.a === 'send') shareSend(title, text);
-        else { $('#mOk').click(); setTimeout(scanQr, 60); }
+        const act = a.dataset.a;
+        if (act === 'send') { shareSend(title, text); return; }
+        if (act === 'scan') { $('#mOk').click(); setTimeout(scanQr, 60); return; }
+        if (act === 'copy') {
+          navigator.clipboard.writeText(text)
+            .then(() => toast('📋 Скопійовано — встав у будь-який чат', 'good'))
+            .catch(() => toast('Браузер не дав скопіювати', 'warn'));
+          return;
+        }
+        sendToMessenger(act, text, link);
       };
     },
   });
@@ -1344,7 +1373,143 @@ $('#sheet').onclick = (e) => { if (e.target.closest('[data-close]')) closeSheet(
 $('#menuBtn').onclick = () => openSheet();
 $('#addHereBtn').onclick = () => { closeSheet(); markHere(); };
 $('#scanBtn').onclick = () => { closeSheet(); setTimeout(scanQr, 120); };
-$('#addCoordBtn').onclick = () => { closeSheet(); newPointDialog(0, 0, { coords: true }); };
+$('#addCoordBtn').onclick = () => { closeSheet(); findPlaceDialog(); };
+
+
+/* ---------- адреса, посилання, геокодер ---------- */
+
+/** Витягує координати з усього, що можна вставити:
+ *  посилання Google Maps / OSM, «49.84, 24.03», градуси з символами.
+ *  Повертає {lat,lon} | {short:true} | null (тоді це адреса для пошуку). */
+function parseAnyLocation(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return null;
+
+  // короткі посилання не розгорнути з браузера - заважає CORS
+  if (/(maps\.app\.goo\.gl|goo\.gl\/maps)/i.test(s)) return { short: true };
+
+  const pats = [
+    /[?&]q=(-?\d+\.\d+),\s*(-?\d+\.\d+)/i,          // ?q=lat,lon
+    /[?&]ll=(-?\d+\.\d+),\s*(-?\d+\.\d+)/i,         // ?ll=lat,lon
+    /[?&](?:daddr|destination)=(-?\d+\.\d+),\s*(-?\d+\.\d+)/i,
+    /@(-?\d+\.\d+),(-?\d+\.\d+)/,                   // /maps/@lat,lon,17z
+    /[#?&]mlat=(-?\d+\.\d+).*?[&]mlon=(-?\d+\.\d+)/i, // openstreetmap.org
+    /#map=\d+\/(-?\d+\.\d+)\/(-?\d+\.\d+)/,
+  ];
+  for (const re of pats) {
+    const m = s.match(re);
+    if (m) {
+      const lat = +m[1], lon = +m[2];
+      if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon };
+    }
+  }
+
+  // внутрішній формат google place: !3d - широта, !4d - довгота, порядок буває різний
+  const d3 = s.match(/!3d(-?\d+\.\d+)/), d4 = s.match(/!4d(-?\d+\.\d+)/);
+  if (d3 && d4) {
+    const lat = +d3[1], lon = +d4[1];
+    if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180) return { lat, lon };
+  }
+
+  // градуси-хвилини-секунди: 50°27'00.4"N 30°31'24.3"E
+  const dms = s.match(/(\d{1,3})°\s*(\d{1,2})['′]\s*([\d.]+)["″]?\s*([NSПп])[,\s]+(\d{1,3})°\s*(\d{1,2})['′]\s*([\d.]+)["″]?\s*([EWЗз])/i);
+  if (dms) {
+    const d = (a, b, c) => +a + +b / 60 + +c / 3600;
+    let lat = d(dms[1], dms[2], dms[3]), lon = d(dms[5], dms[6], dms[7]);
+    if (/[Ss]/.test(dms[4])) lat = -lat;
+    if (/[Ww]/.test(dms[8])) lon = -lon;
+    return { lat, lon };
+  }
+
+  // просто пара чисел - але не всередині посилання
+  if (!/https?:\/\//i.test(s)) {
+    const c = parseCoords(s);
+    if (c) return c;
+  }
+  return null;
+}
+
+/** Пошук адреси через Nominatim (OpenStreetMap). Потрібен інтернет. */
+async function geocode(q) {
+  const u = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&accept-language=uk&q=' + encodeURIComponent(q);
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15000);
+  try {
+    const r = await fetch(u, { signal: ctl.signal, headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    return j.map((x) => ({ lat: +x.lat, lon: +x.lon, name: x.display_name }));
+  } finally { clearTimeout(timer); }
+}
+
+/** Діалог «знайти місце»: адреса, посилання або координати. */
+async function findPlaceDialog() {
+  let picked = null;
+  const res = await modal({
+    title: 'Знайти місце',
+    ok: 'Далі', cancel: 'Скасувати',
+    html: `<input class="inp" id="fQ" placeholder="Вулиця, місто — або посилання з карт" inputmode="text">
+      <div class="row-btns"><button class="btn primary" type="button" id="fGo">🔎 Знайти</button>
+        <button class="btn" type="button" id="fPaste">📋 Вставити</button></div>
+      <div id="fRes" class="find-res"></div>
+      <p class="note">Можна: «Львів, Шевченка 10» · посилання з Google Maps · «49.8397, 24.0297».
+        Пошук адреси потребує інтернету, координати й посилання працюють без нього.</p>`,
+    onOpen: (b) => {
+      const inp = b.querySelector('#fQ'), out = b.querySelector('#fRes');
+      const show = (html) => { out.innerHTML = html; };
+      const pick = (lat, lon, name) => {
+        picked = { lat, lon, name };
+        show(`<div class="find-ok">✅ ${name ? esc(name) + '<br>' : ''}<small>${fmtCoord(lat, lon)}</small></div>`);
+      };
+      const run = async () => {
+        const v = inp.value.trim();
+        if (!v) return;
+        const loc = parseAnyLocation(v);
+        if (loc && loc.short) {
+          show('<div class="find-err">Коротке посилання тут не розгорнути. Відкрий його в картах і скопіюй адресний рядок або самі координати.</div>');
+          return;
+        }
+        if (loc) { pick(loc.lat, loc.lon, null); return; }
+        if (!navigator.onLine) { show('<div class="find-err">Немає інтернету — пошук за адресою недоступний. Встав координати або посилання.</div>'); return; }
+        show('<div class="find-wait">Шукаю…</div>');
+        try {
+          const list = await geocode(v);
+          if (!list.length) { show('<div class="find-err">Нічого не знайшов. Спробуй інакше написати адресу.</div>'); return; }
+          show(list.map((x, i) => `<button type="button" class="find-item" data-i="${i}">${esc(x.name)}</button>`).join(''));
+          out.onclick = (e) => {
+            const it = e.target.closest('.find-item'); if (!it) return;
+            const x = list[+it.dataset.i]; pick(x.lat, x.lon, x.name.split(',').slice(0, 2).join(',').trim());
+          };
+        } catch (e) {
+          show('<div class="find-err">Не вдалося виконати пошук. Перевір звʼязок.</div>');
+        }
+      };
+      b.querySelector('#fGo').onclick = run;
+      inp.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); run(); } };
+      b.querySelector('#fPaste').onclick = async () => {
+        try { inp.value = await navigator.clipboard.readText(); run(); }
+        catch (e) { toast('Браузер не дав доступ до буфера — встав вручну', 'warn'); inp.focus(); }
+      };
+      setTimeout(() => inp.focus(), 50);
+    },
+    validate: () => {
+      if (!picked) { toast('Спершу знайди місце', 'warn'); return false; }
+      return picked;
+    },
+  });
+  if (!res) return;
+  const first = S.points.length === 0;
+  const got = await modal({
+    title: 'Зберегти точку',
+    html: pointForm({ name: res.name ? res.name.slice(0, 40) : 'Точка ' + (S.points.length + 1), icon: '📍', showTarget: true, tgt: first || !S.targetId }),
+    onOpen: (b) => { bindEmoji(b); b.querySelector('#fName').select(); },
+    validate: (b) => readForm(b),
+  });
+  if (!got) return;
+  const p = addPoint({ name: got.name, icon: got.icon, lat: res.lat, lon: res.lon }, got.tgt);
+  vibrate(30); toast(`${p.icon} «${p.name}» збережено`, 'good');
+  setFollow(false); map.setView([p.lat, p.lon], Math.max(map.getZoom(), 15));
+}
 
 /* ---------- buttons ---------- */
 $('#markBtn').onclick = markHere;
