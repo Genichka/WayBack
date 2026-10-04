@@ -41,7 +41,7 @@
     <div class="p-val c-orange" id="vTime">—</div>
   </div>
   <div class="panel">
-    <div class="p-title">GPS ±</div>
+    <div class="p-title" id="accTitle">GPS ±</div>
     <div class="p-val" id="vAcc">—</div>
   </div>
 </section>
@@ -62,6 +62,12 @@
         <div><div class="p-title">Повернення до</div><div class="nav-name" id="navName">—</div></div>
         <button class="icon-btn" id="navClose" aria-label="Закрити">✕</button>
       </div>
+      <div class="seg rmode" id="rmodeSeg">
+        <button data-m="direct" class="on"><span>↗</span>Пряма</button>
+        <button data-m="track"><span>👣</span>Моїм треком</button>
+        <button data-m="route"><span>🛣️</span>Дорогами</button>
+      </div>
+      <div class="rmode-info" id="rmodeInfo"></div>
       <div class="nav-body">
         <svg class="compass" id="compass" viewBox="-100 -100 200 200" aria-hidden="true">
           <g id="rose">
@@ -101,6 +107,15 @@
     <div class="sheet-head">
       <h2>Меню</h2>
       <button class="icon-btn" data-close aria-label="Закрити">✕</button>
+    </div>
+    <div class="prof">
+      <div class="prof-lbl">Де ти зараз</div>
+      <div class="seg prof-seg" id="profSeg">
+        <button data-p="city"><span>🏙️</span>Місто</button>
+        <button data-p="forest"><span>🌲</span>Ліс</button>
+        <button data-p="mount"><span>⛰️</span>Гори</button>
+      </div>
+      <div class="prof-info" id="profInfo"></div>
     </div>
     <div class="tabs" id="tabs">
       <button data-tab="points" class="on">Точки</button>

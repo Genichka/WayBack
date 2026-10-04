@@ -1,14 +1,30 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.5.1';
+const APP_VERSION = '1.7.1';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /* ---------- storage ---------- */
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('wb.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
-  set(k, v) { try { localStorage.setItem('wb.' + k, JSON.stringify(v)); return true; } catch (e) { toast('Не вдалося зберегти дані — памʼять заповнена', 'warn'); return false; } },
+  set(k, v) {
+    try { localStorage.setItem('wb.' + k, JSON.stringify(v)); return true; }
+    catch (e) {
+      // памʼять скінчилась: прибираємо найстаріший трек і пробуємо ще раз
+      if (typeof S !== 'undefined' && S.tracks && S.tracks.length > 1) {
+        S.tracks.pop();
+        try {
+          localStorage.setItem('wb.tracks', JSON.stringify(S.tracks));
+          if (k !== 'tracks') localStorage.setItem('wb.' + k, JSON.stringify(v));
+          toast('Памʼять була заповнена — прибрано найстаріший трек', 'warn');
+          return true;
+        } catch (e2) { /* не допомогло */ }
+      }
+      toast('Не вдалося зберегти дані — памʼять заповнена', 'warn');
+      return false;
+    }
+  },
 };
 
 /* ---------- map layers ---------- */
@@ -26,7 +42,23 @@ const TILE_CACHE = 'wayback-tiles';
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 
 /* ---------- state ---------- */
-const DEF_SETTINGS = { v: 2, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, radius: 2, zmax: 16 };
+const DEF_SETTINGS = { v: 2, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, radius: 2, zmax: 16, rmode: 'direct', profile: 'city' };
+
+/* Профіль середовища. Міняє не лише підпис, а й поведінку:
+   layer   - шар карти за замовчуванням
+   rmode   - спосіб повернення за замовчуванням
+   minStep - мінімальний крок між точками треку, м (у лісі густіше - точніше назад)
+   maxAcc  - гірша похибка GPS, за якої точку ще пишемо (під кроною вона велика)
+   arrive  - радіус "ти на місці", м */
+const PROFILES = {
+  city:   { name: 'Місто', ico: '🏙️', layer: 'osm',  rmode: 'route', minStep: 8, maxAcc: 40, arrive: 15,
+            info: 'Дороги й вулиці, схема карти. Повернення вулицями — потрібен інтернет.' },
+  forest: { name: 'Ліс',   ico: '🌲', layer: 'topo', rmode: 'track', minStep: 5, maxAcc: 60, arrive: 25,
+            info: 'Ведення своїм треком, топокарта, густіший запис. Завантаж район заздалегідь.' },
+  mount:  { name: 'Гори',  ico: '⛰️', layer: 'topo', rmode: 'track', minStep: 4, maxAcc: 60, arrive: 30,
+            info: 'Тільки трек: пряма в горах може вести через урвище. Показано висоту.' },
+};
+const PROF = () => PROFILES[S.settings.profile] || PROFILES.city;
 const S = {
   settings: (() => { const st = Object.assign({}, DEF_SETTINGS, LS.get('settings', {})); if (!(st.v >= 2)) { st.v = 2; st.layer = 'osm'; } return st; })(),
   points: LS.get('points', []),
@@ -37,9 +69,23 @@ const S = {
   heading: null, headingSrc: null, lastCompass: 0,
   follow: true, firstFix: true, pendingStart: false, arrived: false, navOpen: false,
   shownTrackId: null,
+  // повернення: rpath - ламана від мене до цілі, rsrc - звідки вона ('track'|'route')
+  rpath: null, rsrc: null, rpathLen: null, rpathFrom: null, rpathAt: 0,
+  rBusy: false, rErr: null, rOff: false, rLastReq: 0,
 };
 const saveSettings = () => LS.set('settings', S.settings);
 const savePoints = () => { LS.set('points', S.points); LS.set('target', S.targetId); };
+/* Треки живуть у localStorage, а він на домен дає близько 5 МБ.
+   Одна точка - 42 байти, тож густий лісовий трек на 10 км це ~80 КБ.
+   Тримаємо історію в межах бюджету, найстаріші витісняються. */
+const TRACKS_BUDGET = 1.5 * 1024 * 1024;
+const tracksBytes = () => JSON.stringify(S.tracks).length;
+function trimTracks() {
+  if (S.tracks.length > 40) S.tracks = S.tracks.slice(0, 40);
+  let dropped = 0;
+  while (S.tracks.length > 1 && tracksBytes() > TRACKS_BUDGET) { S.tracks.pop(); dropped++; }
+  return dropped;
+}
 let trackSaveTimer = null;
 const saveTrack = (now) => {
   clearTimeout(trackSaveTimer);
@@ -163,9 +209,23 @@ map.on('dragstart', () => setFollow(false));
 
 const meIcon = L.divIcon({ className: '', html: '<div class="me"><div class="me-dir" id="meDir"></div><div class="me-dot"></div></div>', iconSize: [26, 26], iconAnchor: [13, 13] });
 let meMarker = null, accCircle = null;
-const trackLine = L.polyline([], { color: '#ff9830', weight: 4, opacity: .9 }).addTo(map);
-const histLine = L.polyline([], { color: '#b877d9', weight: 4, opacity: .85, dashArray: '2 7' }).addTo(map);
-const guideLine = L.polyline([], { color: '#73bf69', weight: 2.5, opacity: .9, dashArray: '8 8', interactive: false }).addTo(map);
+// Лінії малюються парами: темна обводка знизу + яскрава лінія зверху.
+// Так вони читаються і на супутнику, і на світлій схемі.
+const CASE = { color: '#0a0d13', opacity: .55, interactive: false, lineCap: 'round', lineJoin: 'round' };
+const trackCase = L.polyline([], Object.assign({}, CASE, { weight: 8 })).addTo(map);
+const trackLine = L.polyline([], { color: '#ffa726', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+const histLine  = L.polyline([], { color: '#c98cf1', weight: 4, opacity: .9, dashArray: '2 8' }).addTo(map);
+const routeCase = L.polyline([], Object.assign({}, CASE, { weight: 10 })).addTo(map);
+const routeLine = L.polyline([], { color: '#4dd2ff', weight: 6, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+const guideCase = L.polyline([], Object.assign({}, CASE, { weight: 8 })).addTo(map);
+const guideLine = L.polyline([], { color: '#5ee07a', weight: 4.5, opacity: 1, dashArray: '12 9', interactive: false, lineCap: 'round' }).addTo(map);
+const chevrons  = L.layerGroup().addTo(map);
+
+const RMODE = {
+  direct: { name: 'Пряма',      ico: '↗',  color: '#5ee07a' },
+  track:  { name: 'Моїм треком', ico: '👣', color: '#ffd24d' },
+  route:  { name: 'Дорогами',    ico: '🛣️', color: '#4dd2ff' },
+};
 const pointLayer = L.layerGroup().addTo(map);
 
 function setFollow(v) { S.follow = v; $('#fabMe').classList.toggle('on', v); }
@@ -278,19 +338,19 @@ const needsCompassPermission = () => typeof DeviceOrientationEvent !== 'undefine
 /* ---------- track ---------- */
 function recordPoint() {
   const tr = S.track, p = S.pos;
-  if (!tr || !p || p.acc > 40) return;
+  if (!tr || !p || p.acc > PROF().maxAcc) return;
   const cur = [+p.lat.toFixed(6), +p.lon.toFixed(6), p.t, Math.round(p.acc), p.alt != null ? Math.round(p.alt) : null];
   const last = tr.pts[tr.pts.length - 1];
   if (last) {
     const d = dist(last, cur), dt = (cur[2] - last[2]) / 1000;
-    if (d < Math.max(5, p.acc * 0.4)) return;
+    if (d < Math.max(PROF().minStep, p.acc * 0.4)) return;
     // стрибок GPS: ігноруємо, але якщо таких 3 поспіль — значить це реальний рух (напр. авто)
     if (dt > 0 && d / dt > 15 && (S.jumps = (S.jumps || 0) + 1) < 3) return;
     S.jumps = 0;
     tr.dist += d;
   }
   tr.pts.push(cur);
-  trackLine.addLatLng([cur[0], cur[1]]);
+  trackLine.addLatLng([cur[0], cur[1]]); trackCase.addLatLng([cur[0], cur[1]]);
   saveTrack();
 }
 function startTrack() {
@@ -301,7 +361,7 @@ function startTrack() {
     toast(`🚗 Точку «${pt.name}» позначено`, 'good');
   }
   S.track = { id: 't' + Date.now(), start: Date.now(), pts: [], dist: 0, target: target() ? target().name : null };
-  trackLine.setLatLngs([]);
+  trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   recordPoint(); saveTrack(true);
   wake(true); vibrate(40);
   updateTrackBtn(); updateAll();
@@ -310,9 +370,14 @@ async function stopTrack() {
   const ok = await confirmBox('Завершити запис?', `Пройдено ${fmtDist(S.track.dist)} за ${fmtDur(Date.now() - S.track.start)}. Трек збережеться в історії.`, 'Завершити');
   if (!ok) return;
   const tr = S.track; tr.end = Date.now();
-  if (tr.pts.length > 1) { S.tracks.unshift(tr); S.tracks = S.tracks.slice(0, 40); LS.set('tracks', S.tracks); }
+  if (tr.pts.length > 1) {
+    S.tracks.unshift(tr);
+    const dropped = trimTracks();
+    LS.set('tracks', S.tracks);
+    if (dropped) toast(`Історію підчищено: найстаріших треків прибрано ${dropped}`, 'warn');
+  }
   S.track = null; saveTrack(true);
-  trackLine.setLatLngs([]);
+  trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   if (!S.navOpen) wake(false);
   updateTrackBtn(); updateAll(); toast('Трек збережено', 'good');
 }
@@ -558,26 +623,279 @@ $('#pointList').onclick = (e) => {
   }
 };
 
+
+/* ================= повернення: пряма / трек / дороги ================= */
+
+/** Найближча точка ламаної до p. Повертає {i, t, pt, d} —
+ *  i: індекс сегмента, t: 0..1 уздовж нього, pt: проєкція, d: відстань у метрах. */
+function nearestOnPath(path, p) {
+  let best = { i: 0, t: 0, pt: path[0], d: Infinity };
+  for (let i = 0; i < path.length - 1; i++) {
+    const a = path[i], b = path[i + 1];
+    // локальна плоска апроксимація, на масштабах прогулянки похибка нехтовна
+    const kx = Math.cos(rad(p[0])), ax = a[1] * kx, bx = b[1] * kx, px = p[1] * kx;
+    const vx = bx - ax, vy = b[0] - a[0], wx = px - ax, wy = p[0] - a[0];
+    const len2 = vx * vx + vy * vy;
+    let t = len2 ? (wx * vx + wy * vy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    const pt = [a[0] + vy * t, a[1] + (b[1] - a[1]) * t];
+    const d = dist(p, pt);
+    if (d < best.d) best = { i, t, pt, d };
+  }
+  return best;
+}
+
+/** Довжина ламаної від позиції (i,t) до кінця. */
+function restLen(path, at) {
+  let s = dist(at.pt, path[at.i + 1] || at.pt);
+  for (let i = at.i + 1; i < path.length - 1; i++) s += dist(path[i], path[i + 1]);
+  return s;
+}
+
+/** Точка на ламаній за `ahead` метрів попереду позиції (i,t) — щоб стрілка не смикалась. */
+function pointAhead(path, at, ahead) {
+  let left = ahead, cur = at.pt, i = at.i + 1;
+  while (i < path.length) {
+    const d = dist(cur, path[i]);
+    if (d >= left) {
+      const k = d ? left / d : 0;
+      return [cur[0] + (path[i][0] - cur[0]) * k, cur[1] + (path[i][1] - cur[1]) * k];
+    }
+    left -= d; cur = path[i]; i++;
+  }
+  return path[path.length - 1];
+}
+
+/** Прорідити ламану: прибрати точки ближчі за `min` метрів. */
+function thin(pts, min) {
+  if (pts.length < 3) return pts.slice();
+  const out = [pts[0]];
+  for (let i = 1; i < pts.length - 1; i++) if (dist(out[out.length - 1], pts[i]) >= min) out.push(pts[i]);
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+
+/** Трек, яким можна вертатись: активний запис або найсвіжіший збережений,
+ *  що починається біля цілі. */
+function returnTrack() {
+  const t = target();
+  if (S.track && S.track.pts.length > 3) return S.track;
+  if (!t) return null;
+  for (const tr of S.tracks) {
+    if (!tr.pts || tr.pts.length < 4) continue;
+    if (dist([tr.pts[0][0], tr.pts[0][1]], [t.lat, t.lon]) < 250) return tr;
+  }
+  return null;
+}
+
+/** Побудувати шлях назад по пройденому треку. */
+function buildTrackPath() {
+  const tr = returnTrack(), t = target();
+  if (!tr || !S.pos) return null;
+  const pts = tr.pts.map((p) => [p[0], p[1]]);
+  const here = [S.pos.lat, S.pos.lon];
+  const at = nearestOnPath(pts, here);
+  // від точки виходу на трек -> назад по треку до його початку.
+  // Саме мене в шлях не включаємо: відрізок "я -> трек" малюється
+  // окремим поводком, і тоді видно, що я осторонь сліду.
+  const back = pts.slice(0, at.i + 1).reverse();
+  let path = [at.pt, ...back];
+  if (t) path.push([t.lat, t.lon]);
+  path = thin(path, 4);
+  return path.length > 1 ? path : null;
+}
+
+/* ---- маршрут дорогами (OSRM, пішохідний профіль) ---- */
+const ROUTE_URL = 'https://routing.openstreetmap.de/routed-foot/route/v1/foot/';
+let routeAbort = null;
+
+async function fetchRoute(from, to) {
+  if (routeAbort) routeAbort.abort();
+  routeAbort = new AbortController();
+  const u = `${ROUTE_URL}${from[1].toFixed(6)},${from[0].toFixed(6)};${to[1].toFixed(6)},${to[0].toFixed(6)}?overview=full&geometries=geojson&alternatives=false&steps=false`;
+  const to_ = setTimeout(() => routeAbort && routeAbort.abort(), 15000);
+  try {
+    const r = await fetch(u, { signal: routeAbort.signal });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const j = await r.json();
+    const rt = j.routes && j.routes[0];
+    if (!rt || !rt.geometry || !rt.geometry.coordinates.length) throw new Error('empty');
+    return { path: rt.geometry.coordinates.map((c) => [c[1], c[0]]), len: rt.distance };
+  } finally { clearTimeout(to_); routeAbort = null; }
+}
+
+async function requestRoute(force) {
+  const t = target();
+  if (!t || !S.pos) return;
+  const here = [S.pos.lat, S.pos.lon];
+  const now = Date.now();
+  if (!force) {
+    if (S.rBusy || now - S.rLastReq < 20000) return;
+    if (S.rpathFrom && dist(here, S.rpathFrom) < 75) return;
+  }
+  if (!navigator.onLine) {
+    S.rErr = 'офлайн'; applyFallback('Немає інтернету — маршрут дорогами недоступний');
+    return;
+  }
+  S.rBusy = true; S.rErr = null; S.rLastReq = now; renderNav();
+  try {
+    const res = await fetchRoute(here, [t.lat, t.lon]);
+    S.rpath = res.path; S.rsrc = 'route'; S.rpathLen = res.len; S.rpathFrom = here; S.rErr = null;
+    drawReturn();
+  } catch (e) {
+    S.rErr = (e && e.name === 'AbortError') ? 'перервано' : 'немає дороги';
+    applyFallback('Дороги тут не знайшлось — показую інший шлях');
+  } finally { S.rBusy = false; updateAll(); }
+}
+
+/** Якщо обраний режим не вдався — м'яко відкотитись: трек, інакше пряма. */
+function applyFallback(msg) {
+  const p = buildTrackPath();
+  if (p) { S.rpath = p; S.rsrc = 'track'; S.rpathLen = null; toast(msg + ' — веду твоїм треком', 'warn'); }
+  else { S.rpath = null; S.rsrc = null; toast(msg + ' — веду по прямій', 'warn'); }
+  drawReturn();
+}
+
+/* ---- малювання ---- */
+function drawReturn() {
+  const col = S.rsrc ? RMODE[S.rsrc].color : null;
+  if (S.rpath && S.rpath.length > 1) {
+    routeCase.setLatLngs(S.rpath); routeLine.setLatLngs(S.rpath).setStyle({ color: col });
+    guideLine.setLatLngs([]); guideCase.setLatLngs([]);
+  } else {
+    routeCase.setLatLngs([]); routeLine.setLatLngs([]);
+  }
+  drawChevrons();
+}
+
+function drawChevrons() {
+  chevrons.clearLayers();
+  const p = S.rpath;
+  if (!p || p.length < 2 || !map) return;
+  const step = Math.max(40, (S.rpathLen || 1000) / 40);
+  let acc = step, placed = 0;
+  for (let i = 0; i < p.length - 1 && placed < 60; i++) {
+    let seg = dist(p[i], p[i + 1]);
+    if (!seg) continue;
+    const br = bearing(p[i], p[i + 1]);
+    while (acc <= seg && placed < 60) {
+      const k = acc / seg;
+      const ll = [p[i][0] + (p[i + 1][0] - p[i][0]) * k, p[i][1] + (p[i + 1][1] - p[i][1]) * k];
+      chevrons.addLayer(L.marker(ll, {
+        interactive: false, keyboard: false,
+        icon: L.divIcon({ className: 'chev', iconSize: [16, 16], iconAnchor: [8, 8],
+          html: `<i style="transform:rotate(${br}deg)"></i>` }),
+      }));
+      acc += step; placed++;
+    }
+    acc -= seg;
+  }
+}
+
+/* ---- перемикання режиму ---- */
+function setReturnMode(m, silent) {
+  if (m === 'direct' && S.settings.profile === 'mount' && !silent)
+    toast('⛰️ У горах пряма може вести через урвище — надійніше трек', 'warn');
+  S.settings.rmode = m; saveSettings();
+  syncModeSeg();
+  S.rpath = null; S.rsrc = null; S.rpathLen = null; S.rpathFrom = null; S.rErr = null;
+  routeCase.setLatLngs([]); routeLine.setLatLngs([]); chevrons.clearLayers();
+  if (m === 'track') {
+    const p = buildTrackPath();
+    if (p) { S.rpath = p; S.rsrc = 'track'; S.rpathLen = null; if (!silent) toast('👣 Веду твоїм треком', 'good'); }
+    else if (!silent) toast('Немає записаного треку до цієї точки — лишаю пряму', 'warn');
+  } else if (m === 'route') {
+    requestRoute(true);
+    if (!silent) toast('🛣️ Шукаю шлях дорогами…');
+  }
+  drawReturn(); updateAll();
+}
+
+/** Перебудова шляху на ходу. Викликається з updateAll. */
+function refreshReturn() {
+  const m = S.settings.rmode;
+  if (m === 'direct' || !S.pos || !target()) return;
+  if (m === 'track') {
+    const p = buildTrackPath();
+    if (p) { S.rpath = p; S.rsrc = 'track'; drawReturn(); }
+    return;
+  }
+  if (m === 'route') {
+    if (!S.rpath) { requestRoute(false); return; }
+    const at = nearestOnPath(S.rpath, [S.pos.lat, S.pos.lon]);
+    if (at.d > 60) requestRoute(false);   // збився з маршруту - перерахувати
+  }
+}
+
+
+/* ---------- профіль середовища ---------- */
+function syncProfSeg() {
+  document.querySelectorAll('#profSeg button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.p === S.settings.profile));
+  const el = $('#profInfo');
+  if (el) el.textContent = PROF().info;
+}
+function setProfile(id, silent) {
+  if (!PROFILES[id]) return;
+  const p = PROFILES[id];
+  S.settings.profile = id;
+  S.settings.layer = p.layer;
+  saveSettings();
+  setLayer(p.layer);
+  if (typeof renderMapTab === 'function' && $('#layerSeg')) renderMapTab();
+  setReturnMode(p.rmode, true);
+  syncProfSeg();
+  if (!silent) toast(`${p.ico} Режим: ${p.name}`, 'good');
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#profSeg button');
+  if (b) setProfile(b.dataset.p);
+});
+
 /* ---------- navigation / stats ---------- */
 function updateAll() {
   const t = target(), here = S.pos ? [S.pos.lat, S.pos.lon] : null;
   let d = null, b = null;
   $('#pTargetName').textContent = t ? `${t.icon} ${t.name}` : 'До точки';
-  if (t && here) {
-    d = dist(here, [t.lat, t.lon]); b = bearing(here, [t.lat, t.lon]);
+  const straight = (t && here) ? dist(here, [t.lat, t.lon]) : null;
+
+  if (t && here) refreshReturn();
+
+  const usePath = t && here && S.settings.rmode !== 'direct' && S.rpath && S.rpath.length > 1;
+  if (usePath) {
+    const at = nearestOnPath(S.rpath, here);
+    S.rpathAt = at.i; S.rOff = at.d > 50;
+    d = at.d + restLen(S.rpath, at);
+    b = bearing(here, pointAhead(S.rpath, at, 30));
+    // короткий поводок від мене до маршруту, якщо я осторонь від нього
+    if (at.d > 20) { guideLine.setLatLngs([here, at.pt]); guideCase.setLatLngs([here, at.pt]); }
+    else { guideLine.setLatLngs([]); guideCase.setLatLngs([]); }
+  } else if (t && here) {
+    d = straight; b = bearing(here, [t.lat, t.lon]);
+    S.rOff = false;
     guideLine.setLatLngs([here, [t.lat, t.lon]]);
-  } else guideLine.setLatLngs([]);
-  S.navDist = d; S.navBearing = b;
+    guideCase.setLatLngs([here, [t.lat, t.lon]]);
+  } else { guideLine.setLatLngs([]); guideCase.setLatLngs([]); }
+  S.navDist = d; S.navBearing = b; S.navStraight = straight;
   $('#vDist').textContent = t ? fmtDist(d) : 'немає';
-  $('#vAcc').textContent = S.pos ? Math.round(S.pos.acc) + ' м' : '—';
-  $('#vAcc').className = 'p-val ' + (!S.pos ? '' : S.pos.acc <= 15 ? 'c-green' : S.pos.acc <= 40 ? 'c-yellow' : 'c-red');
+  if (S.settings.profile === 'mount' && S.pos && S.pos.alt != null) {
+    // похибка GPS і так видно у значку вгорі, тож у горах тут корисніша висота;
+    // якщо пристрій висоти не дає - панель лишається з похибкою, а не порожня
+    $('#accTitle').textContent = 'Висота';
+    $('#vAcc').textContent = Math.round(S.pos.alt) + ' м';
+    $('#vAcc').className = 'p-val c-blue';
+  } else {
+    $('#accTitle').textContent = 'GPS ±';
+    $('#vAcc').textContent = S.pos ? Math.round(S.pos.acc) + ' м' : '—';
+    $('#vAcc').className = 'p-val ' + (!S.pos ? '' : S.pos.acc <= 15 ? 'c-green' : S.pos.acc <= 40 ? 'c-yellow' : 'c-red');
+  }
   updateTimer();
 
-  // прибуття
-  if (d != null) {
-    const near = d <= Math.max(15, (S.pos.acc || 0) * 0.8);
+  // прибуття - завжди по прямій до цілі, незалежно від режиму
+  if (straight != null) {
+    const near = straight <= Math.max(PROF().arrive, (S.pos.acc || 0) * 0.8);
     if (near && !S.arrived) { S.arrived = true; vibrate([200, 100, 200]); if (S.navOpen) toast('🎉 Ти на місці!', 'good'); }
-    else if (!near && d > 40) S.arrived = false;
+    else if (!near && straight > 40) S.arrived = false;
   }
   if (S.navOpen) renderNav();
   updateHeadingUi();
@@ -628,7 +946,22 @@ function renderNav() {
   if (S.arrived) { dEl.textContent = 'Ти на місці 🎉'; dEl.classList.add('arrived'); }
   else { dEl.textContent = fmtDist(S.navDist); dEl.classList.remove('arrived'); }
   const hasH = headingFresh();
-  $('#navSub').textContent = `азимут ${Math.round(S.navBearing)}° · ${dirName(S.navBearing)}`;
+  const m = S.settings.rmode, rm = RMODE[m];
+  let sub = `азимут ${Math.round(S.navBearing)}° · ${dirName(S.navBearing)}`;
+  if (m !== 'direct') {
+    if (S.rBusy) sub += ' · шукаю маршрут…';
+    else if (S.rpath) sub += ` · ${rm.name.toLowerCase()}, навпростець ${fmtDist(S.navStraight)}`;
+    else sub += ' · маршрут не побудовано, веду по прямій';
+  }
+  $('#navSub').textContent = sub;
+  const info = $('#rmodeInfo');
+  if (info) {
+    if (m === 'direct') info.textContent = 'Пряма — найкоротший напрям, без урахування доріг і перешкод.';
+    else if (S.rBusy) info.textContent = 'Будую маршрут…';
+    else if (S.rOff) info.innerHTML = '<b style="color:var(--orange)">Ти осторонь маршруту</b> — зеленим показано, як до нього вийти.';
+    else if (S.rpath) info.textContent = m === 'track' ? 'Веду назад твоїм же слідом.' : 'Веду дорогами й стежками.';
+    else info.textContent = m === 'track' ? 'Немає записаного треку — веду по прямій.' : 'Маршрут недоступний — веду по прямій.';
+  }
   if (hasH) {
     hint.innerHTML = S.headingSrc === 'compass' ? 'Тримай телефон горизонтально. Іди за зеленою стрілкою.' : 'Напрям за рухом GPS — іди рівно, стрілка уточниться.';
   } else if (needsCompassPermission() && !compassBound) {
@@ -638,6 +971,17 @@ function renderNav() {
     hint.innerHTML = 'Компас недоступний: стрілка показує напрям відносно <b style="color:var(--red)">N</b> (півночі). Почни йти — напрям візьмемо з GPS.';
   }
 }
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#rmodeSeg button');
+  if (b) setReturnMode(b.dataset.m);
+});
+function syncModeSeg() {
+  document.querySelectorAll('#rmodeSeg button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.m === S.settings.rmode));
+}
+syncModeSeg();
+syncProfSeg();
+
 function buildTicks() {
   let s = '';
   for (let a = 0; a < 360; a += 15) {
@@ -654,7 +998,12 @@ function openNav() {
   S.navOpen = true; $('#nav').classList.remove('hidden'); $('#navBtn').classList.add('on');
   enableCompass(); wake(true);
   const t = target();
-  if (S.pos) { setFollow(false); map.fitBounds(L.latLngBounds([[S.pos.lat, S.pos.lon], [t.lat, t.lon]]).pad(0.25), { paddingBottomRight: [0, 200], maxZoom: 17 }); }
+  setReturnMode(S.settings.rmode, true);
+  if (S.pos) {
+    setFollow(false);
+    const pts = (S.rpath && S.rpath.length > 1) ? S.rpath.slice() : [[S.pos.lat, S.pos.lon], [t.lat, t.lon]];
+    map.fitBounds(L.latLngBounds(pts).pad(0.25), { paddingBottomRight: [0, 260], maxZoom: 17 });
+  }
   renderNav(); renderCompass();
 }
 function closeNav() {
@@ -687,6 +1036,11 @@ function renderTrackList() {
       <div class="i-acts"><button data-cur="gpx" title="GPX">⬇️</button></div></div>`;
   }
   if (!S.tracks.length && !S.track) { el.innerHTML = '<div class="empty">Збережених треків ще немає</div>'; return; }
+  if (S.tracks.length) {
+    const kb = tracksBytes() / 1024, pct = Math.round(tracksBytes() / TRACKS_BUDGET * 100);
+    html += `<div class="kv tracks-kv"><span>Історія: ${S.tracks.length} ${S.tracks.length === 1 ? 'трек' : 'тр.'}</span>` +
+            `<b class="${pct > 85 ? 'c-orange' : ''}">${kb < 1024 ? kb.toFixed(0) + ' КБ' : (kb / 1024).toFixed(1) + ' МБ'} · ${pct}%</b></div>`;
+  }
   html += S.tracks.map((t) => `<div class="item${t.id === S.shownTrackId ? ' tgt' : ''}" data-id="${t.id}">
       <span class="i-ico">🥾</span>
       <div class="i-main" data-a="show"><b>${fmtDate(t.start)}${t.target ? ' · ' + esc(t.target) : ''}</b><small>${fmtDist(t.dist)} · ${fmtDur(t.end - t.start)}</small></div>
@@ -884,8 +1238,13 @@ $('#exitBtn').onclick = async () => {
   if (S.track) {
     if (!(await confirmBox('Вийти з додатка?', `Триває запис: ${fmtDist(S.track.dist)}. Трек збережеться в історії.`, 'Зберегти і вийти'))) return;
     const tr = S.track; tr.end = Date.now();
-    if (tr.pts.length > 1) { S.tracks.unshift(tr); S.tracks = S.tracks.slice(0, 40); LS.set('tracks', S.tracks); }
-    S.track = null; saveTrack(true); trackLine.setLatLngs([]); updateTrackBtn();
+    if (tr.pts.length > 1) {
+    S.tracks.unshift(tr);
+    const dropped = trimTracks();
+    LS.set('tracks', S.tracks);
+    if (dropped) toast(`Історію підчищено: найстаріших треків прибрано ${dropped}`, 'warn');
+  }
+    S.track = null; saveTrack(true); trackLine.setLatLngs([]); trackCase.setLatLngs([]); updateTrackBtn();
   }
   wake(false); closeSheet();
   try { window.close(); } catch (e) { /* */ }
