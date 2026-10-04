@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.7.1';
+const APP_VERSION = '1.9.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -42,7 +42,7 @@ const TILE_CACHE = 'wayback-tiles';
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 
 /* ---------- state ---------- */
-const DEF_SETTINGS = { v: 2, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, radius: 2, zmax: 16, rmode: 'direct', profile: 'city' };
+const DEF_SETTINGS = { v: 2, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, radius: 3, zmax: 16, rmode: 'direct', profile: 'city' };
 
 /* Профіль середовища. Міняє не лише підпис, а й поведінку:
    layer   - шар карти за замовчуванням
@@ -73,6 +73,12 @@ const S = {
   rpath: null, rsrc: null, rpathLen: null, rpathFrom: null, rpathAt: 0,
   rBusy: false, rErr: null, rOff: false, rLastReq: 0,
 };
+// у старих версіях вибір був дрібніший - приводимо до нового набору
+(() => {
+  const near = (v, list) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
+  S.settings.radius = near(+S.settings.radius || 3, [1, 3, 10]);
+  S.settings.zmax = near(+S.settings.zmax || 16, [16, 17]);
+})();
 const saveSettings = () => LS.set('settings', S.settings);
 const savePoints = () => { LS.set('points', S.points); LS.set('target', S.targetId); };
 /* Треки живуть у localStorage, а він на домен дає близько 5 МБ.
@@ -1111,16 +1117,22 @@ function updateDlInfo() {
   if ($('#sheet').classList.contains('hidden')) return;
   const { l, list, zmax } = dlPlan();
   const btn = $('#dlBtn');
-  if (!l.dl) { $('#dlInfo').innerHTML = `Шар «${l.name}» (OpenStreetMap) не дозволяє масове завантаження. Обери «Топо» або «Супутник».`; btn.disabled = true; return; }
+  if (!l.dl) {
+    $('#dlInfo').innerHTML = `Шар «${l.name}» не можна завантажувати наперед — так вимагає OpenStreetMap.` +
+      ` Для офлайну підходить «Топо».<br><button class="btn primary mini" id="toTopo">Перемкнути на «Топо»</button>`;
+    const t = $('#toTopo');
+    if (t) t.onclick = () => { setLayer('topo'); renderMapTab(); toast('🗺️ Шар «Топо» — тепер можна завантажити', 'good'); };
+    btn.disabled = true; return;
+  }
   const perTile = S.settings.layer === 'sat' ? 22 : 14; // приблизно, КБ
   const mb = list.length * perTile / 1024;
   const mins = Math.ceil(list.length / 6 / 60); // ~6 плиток/с
   const size = mb < 1000 ? `${mb.toFixed(mb < 10 ? 1 : 0)} МБ` : `${(mb / 1024).toFixed(1)} ГБ`;
   let note = '';
-  if (list.length > MAX_TILES) note = `<br><span class="c-red">Забагато (ліміт ${MAX_TILES}) — зменш радіус або деталізацію.</span>`;
+  if (list.length > MAX_TILES) note = `<br><span class="c-red">Завелико — обери менший район або «Звичайно».</span>`;
   else if (list.length > 6000) note = `<br><span class="c-yellow">Це надовго (~${mins} хв) — краще по Wi-Fi і з зарядкою.</span>`;
   else if (list.length > 1500) note = `<br>Орієнтовно ${mins} хв.`;
-  $('#dlInfo').innerHTML = `Шар <b>${l.name}</b>, ${S.settings.radius} км, масштаб 11–${zmax}: <b>${list.length}</b> плиток ≈ ${size}${note}`;
+  $('#dlInfo').innerHTML = `Район ${S.settings.radius} км, шар «${l.name}» — приблизно <b>${size}</b>${note}`;
   btn.disabled = list.length > MAX_TILES || dlState.running;
 }
 const dlState = { running: false, cancel: false };
@@ -1178,8 +1190,8 @@ function seg(el, items, cur, onPick) {
 }
 function renderMapTab() {
   seg($('#layerSeg'), Object.entries(LAYERS).map(([k, l]) => [k, l.name]), S.settings.layer, (v) => { setLayer(v); updateDlInfo(); });
-  seg($('#radiusSeg'), [[1, '1'], [2, '2'], [3, '3'], [5, '5'], [10, '10'], [15, '15'], [25, '25 км']], S.settings.radius, (v) => { S.settings.radius = +v; saveSettings(); updateDlInfo(); });
-  seg($('#zoomSeg'), [[15, 'Базова'], [16, 'Добра'], [17, 'Макс']], S.settings.zmax, (v) => { S.settings.zmax = +v; saveSettings(); updateDlInfo(); });
+  seg($('#radiusSeg'), [[1, '1 км'], [3, '3 км'], [10, '10 км']], S.settings.radius, (v) => { S.settings.radius = +v; saveSettings(); updateDlInfo(); });
+  seg($('#zoomSeg'), [[16, 'Звичайно'], [17, 'Детально']], S.settings.zmax, (v) => { S.settings.zmax = +v; saveSettings(); updateDlInfo(); });
   updateDlInfo(); updateCacheSize();
 }
 $('#shareBtn').onclick = shareHere;
@@ -1192,7 +1204,8 @@ $('#fabLayer').onclick = () => {
 function renderSettings() {
   seg($('#themeSeg'), [['dark', 'Темна'], ['light', 'Світла']], S.settings.theme, (v) => { S.settings.theme = v; saveSettings(); applyTheme(); });
   $('#setWake').checked = S.settings.wake; $('#setVib').checked = S.settings.vibrate; $('#setAuto').checked = S.settings.auto;
-  $('#updSub').textContent = `Версія ${APP_VERSION}`;
+  updStatus(`Версія ${APP_VERSION}`);
+  const vv = $('#updVer'); if (vv) vv.textContent = `WayBack v${APP_VERSION}`;
   $('#verNote').textContent = `WayBack v${APP_VERSION} · дані зберігаються лише на цьому пристрої`;
 }
 $('#setWake').onchange = (e) => { S.settings.wake = e.target.checked; saveSettings(); if (!e.target.checked) wake(false); else if (S.track || S.navOpen) wake(true); };
@@ -1250,10 +1263,20 @@ $('#exitBtn').onclick = async () => {
   try { window.close(); } catch (e) { /* */ }
   setTimeout(() => toast('Закрий вікно свайпом або кнопкою «Назад» — дані збережено', 'good'), 400);
 };
-$('#updateBtn').onclick = checkUpdate;
+const _ub = $('#updateBtn'); if (_ub) _ub.onclick = checkUpdate;
+const _ub2 = $('#updBtn2'); if (_ub2) _ub2.onclick = checkUpdate;
+{ const t = $('#verTag'); if (t) t.textContent = 'v' + APP_VERSION; }
+{ const v = $('#updVer'); if (v) v.textContent = `WayBack v${APP_VERSION}`; }
+updStatus(`Версія ${APP_VERSION}`);
+function updStatus(t) {
+  ['#updSub', '#updSub2'].forEach((sel) => { const e = $(sel); if (e) e.textContent = t; });
+}
 async function checkUpdate() {
-  const sub = $('#updSub');
-  if (!navigator.onLine) { sub.textContent = `Версія ${APP_VERSION} · немає інтернету`; toast('Немає інтернету — оновлення потребує звʼязку', 'warn'); return; }
+  const btn = $('#updBtn2');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  const done = () => { if (btn) { btn.disabled = false; btn.textContent = 'Оновити'; } };
+  const sub = { set textContent(t) { updStatus(t); } };
+  if (!navigator.onLine) { sub.textContent = `Версія ${APP_VERSION} · немає інтернету`; toast('Немає інтернету — оновлення потребує звʼязку', 'warn'); done(); return; }
   sub.textContent = 'Перевіряю…';
   let remote = null;
   try {
@@ -1261,8 +1284,8 @@ async function checkUpdate() {
     const m = (await r.text()).match(/APP_VERSION\s*=\s*'([^']+)'/);
     remote = m && m[1];
   } catch (e) { /* немає звʼязку */ }
-  if (!remote) { sub.textContent = `Версія ${APP_VERSION} · не вдалося перевірити`; toast('Не вдалося перевірити оновлення', 'warn'); return; }
-  if (remote === APP_VERSION) { sub.textContent = `Версія ${APP_VERSION} — остання ✓`; toast('У тебе остання версія ✓', 'good'); return; }
+  if (!remote) { sub.textContent = `Версія ${APP_VERSION} · не вдалося перевірити`; toast('Не вдалося перевірити оновлення', 'warn'); done(); return; }
+  if (remote === APP_VERSION) { sub.textContent = `Версія ${APP_VERSION} — остання ✓`; toast('У тебе остання версія ✓', 'good'); done(); return; }
   sub.textContent = `Є версія ${remote} — оновлюю…`;
   toast(`⬇️ Оновлення ${remote} — перезапускаю…`, 'good');
   try {
@@ -1274,9 +1297,37 @@ async function checkUpdate() {
   setTimeout(() => location.reload(), 1000);
 }
 
+/* ---------- підказка для новачка ---------- */
+function syncHelp() {
+  const box = $('#helpBox');
+  if (!box) return;
+  const used = S.points.length || S.tracks.length || S.track;
+  box.open = !used && !LS.get('helpSeen', false);
+  box.ontoggle = () => { if (!box.open) LS.set('helpSeen', true); };
+}
+async function firstRun() {
+  if (LS.get('seen', false)) return;
+  LS.set('seen', true);
+  LS.set('helpSeen', true);
+  await modal({
+    title: 'Привіт! Як це працює',
+    cancel: '',
+    ok: 'Зрозуміло',
+    html: `<ol class="help-steps">
+        <li><b>Познач точку</b> там, куди треба повернутись — біля авто чи на стоянці. Кнопка «Позначити».</li>
+        <li><b>Натисни «Старт»</b> і йди. Додаток пише твій слід.</li>
+        <li><b>Натисни «Назад»</b> — стрілка й лінія приведуть до точки.</li>
+      </ol>
+      <p class="note">У меню згори обери, де ти: місто, ліс чи гори — під це підлаштується карта й спосіб повернення.</p>`,
+    validate: () => true,
+  });
+}
+setTimeout(firstRun, 800);
+
 /* ---------- sheet ---------- */
 function openSheet(tab) {
   $('#sheet').classList.remove('hidden');
+  syncHelp();
   showTab(tab || 'points');
 }
 function closeSheet() { $('#sheet').classList.add('hidden'); }
