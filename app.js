@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.9.0';
+const APP_VERSION = '1.9.2';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 

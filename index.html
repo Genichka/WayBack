@@ -11,8 +11,8 @@
 <meta name="application-name" content="WayBack">
 <title>WayBack — повернись на точку</title>
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="icon" href="icon-192-1.png">
-<link rel="apple-touch-icon" href="icon-192-1.png">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
 <link rel="stylesheet" href="leaflet.css">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -220,12 +220,14 @@
           <div class="i-main"><b id="updVer">WayBack</b><small id="updSub2">—</small></div>
           <button class="btn" id="updBtn2">Оновити</button>
         </div>
-        <button class="item" id="exitBtn"><span class="i-ico">🚪</span><div class="i-main"><b>Вийти</b><small>прогулянка збережеться</small></div><span class="chev">›</span></button>
       </div>
       <input type="file" id="importFile" accept=".json,.gpx,application/json,application/gpx+xml" hidden>
       <p class="note">⚠️ Браузер може зупинити GPS, коли екран вимкнено або додаток згорнуто. Під час прогулянки тримай WayBack відкритим (екран можна не дивитися — він не згасне). Дані зберігаються лише на цьому пристрої.</p>
       <p class="note" id="verNote"></p>
     </div>
+
+    <button class="exit-btn" id="exitBtn">🚪 Вийти з додатка</button>
+    <p class="note exit-note">Запис і всі дані збережуться.</p>
   </div>
 </div>
 
