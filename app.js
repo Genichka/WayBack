@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.11.0';
+const APP_VERSION = '1.12.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -216,20 +216,20 @@ const meIcon = L.divIcon({ className: '', html: '<div class="me"><div class="me-
 let meMarker = null, accCircle = null;
 // Лінії малюються парами: темна обводка знизу + яскрава лінія зверху.
 // Так вони читаються і на супутнику, і на світлій схемі.
-const CASE = { color: '#0a0d13', opacity: .55, interactive: false, lineCap: 'round', lineJoin: 'round' };
-const trackCase = L.polyline([], Object.assign({}, CASE, { weight: 8 })).addTo(map);
-const trackLine = L.polyline([], { color: '#ffa726', weight: 5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-const histLine  = L.polyline([], { color: '#c98cf1', weight: 4, opacity: .9, dashArray: '2 8' }).addTo(map);
-const routeCase = L.polyline([], Object.assign({}, CASE, { weight: 10 })).addTo(map);
-const routeLine = L.polyline([], { color: '#4dd2ff', weight: 6, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-const guideCase = L.polyline([], Object.assign({}, CASE, { weight: 8 })).addTo(map);
-const guideLine = L.polyline([], { color: '#5ee07a', weight: 4.5, opacity: 1, dashArray: '12 9', interactive: false, lineCap: 'round' }).addTo(map);
+const CASE = { color: '#0a0d13', opacity: .5, interactive: false, lineCap: 'round', lineJoin: 'round' };
+const trackCase = L.polyline([], Object.assign({}, CASE, { weight: 5 })).addTo(map);
+const trackLine = L.polyline([], { color: '#ffb300', weight: 2.6, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+const histLine  = L.polyline([], { color: '#b388ff', weight: 2.4, opacity: .95, dashArray: '2 7' }).addTo(map);
+const routeCase = L.polyline([], Object.assign({}, CASE, { weight: 6 })).addTo(map);
+const routeLine = L.polyline([], { color: '#00d4ff', weight: 3.2, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+const guideCase = L.polyline([], Object.assign({}, CASE, { weight: 5 })).addTo(map);
+const guideLine = L.polyline([], { color: '#22e06a', weight: 2.8, opacity: 1, dashArray: '10 8', interactive: false, lineCap: 'round' }).addTo(map);
 const chevrons  = L.layerGroup().addTo(map);
 
 const RMODE = {
-  direct: { name: 'Пряма',      ico: '↗',  color: '#5ee07a' },
-  track:  { name: 'Моїм треком', ico: '👣', color: '#ffd24d' },
-  route:  { name: 'Дорогами',    ico: '🛣️', color: '#4dd2ff' },
+  direct: { name: 'Пряма',      ico: '↗',  color: '#22e06a' },
+  track:  { name: 'Моїм треком', ico: '👣', color: '#ffd60a' },
+  route:  { name: 'Дорогами',    ico: '🛣️', color: '#00d4ff' },
 };
 const pointLayer = L.layerGroup().addTo(map);
 
@@ -248,7 +248,9 @@ const target = () => S.points.find((p) => p.id === S.targetId) || null;
 
 /* ---------- GPS ---------- */
 function gpsBadge(state, text) {
-  const b = $('#gpsBadge'); b.className = 'gps ' + state; b.querySelector('span').textContent = text;
+  S.gpsState = state;                       // колір підхопить панель «GPS ±»
+  const b = $('#gpsBadge');
+  if (b) { b.className = 'gps ' + state; b.querySelector('span').textContent = text; }
 }
 function onPos(p) {
   const c = p.coords;
@@ -308,7 +310,7 @@ async function gpsHelp() {
   });
   if (again) { startGps(); navigator.geolocation.getCurrentPosition(onPos, onPosErr, { enableHighAccuracy: true, timeout: 20000 }); }
 }
-$('#gpsBadge').onclick = () => (S.gpsDenied || !S.pos ? gpsHelp() : null);
+{ const g = $('#pAcc') || $('#vAcc'); if (g) g.onclick = () => (S.gpsDenied || !S.pos ? gpsHelp() : null); }
 
 /* ---------- compass ---------- */
 let compassBound = false;
@@ -818,7 +820,7 @@ function drawChevrons() {
   chevrons.clearLayers();
   const p = S.rpath;
   if (!p || p.length < 2 || !map) return;
-  const step = Math.max(40, (S.rpathLen || 1000) / 40);
+  const step = Math.max(70, (S.rpathLen || 1000) / 26);
   let acc = step, placed = 0;
   for (let i = 0; i < p.length - 1 && placed < 60; i++) {
     let seg = dist(p[i], p[i + 1]);
@@ -829,7 +831,7 @@ function drawChevrons() {
       const ll = [p[i][0] + (p[i + 1][0] - p[i][0]) * k, p[i][1] + (p[i + 1][1] - p[i][1]) * k];
       chevrons.addLayer(L.marker(ll, {
         interactive: false, keyboard: false,
-        icon: L.divIcon({ className: 'chev', iconSize: [16, 16], iconAnchor: [8, 8],
+        icon: L.divIcon({ className: 'chev', iconSize: [12, 12], iconAnchor: [6, 6],
           html: `<i style="transform:rotate(${br}deg)"></i>` }),
       }));
       acc += step; placed++;
@@ -932,6 +934,7 @@ function updateAll() {
   } else {
     $('#accTitle').textContent = 'GPS ±';
     $('#vAcc').textContent = S.pos ? Math.round(S.pos.acc) + ' м' : '—';
+    $('#vAcc').className = 'p-val ' + ({ ok: 'c-green', mid: 'c-yellow', bad: 'c-red' }[S.gpsState] || '');
     $('#vAcc').className = 'p-val ' + (!S.pos ? '' : S.pos.acc <= 15 ? 'c-green' : S.pos.acc <= 40 ? 'c-yellow' : 'c-red');
   }
   updateTimer();
@@ -1262,7 +1265,7 @@ async function clearCurrent() {
   drawReturn(); updateTrackBtn(); updateAll();
   toast('Очищено', 'good');
 }
-$('#fabClear').onclick = clearCurrent;
+$('#clearBtn').onclick = clearCurrent;
 
 /* ---------- settings ---------- */
 function renderSettings() {
@@ -1332,7 +1335,7 @@ $('#exitBtn').onclick = async () => {
   setTimeout(() => toast('Закрий вікно свайпом або кнопкою «Назад» — дані збережено', 'good'), 400);
 };
 const _ub = $('#updateBtn'); if (_ub) _ub.onclick = checkUpdate;
-const _ub2 = $('#updBtn2'); if (_ub2) _ub2.onclick = checkUpdate;
+$('#updBtn').onclick = checkUpdate;
 { const t = $('#verTag'); if (t) t.textContent = 'v' + APP_VERSION; }
 { const v = $('#updVer'); if (v) v.textContent = `WayBack v${APP_VERSION}`; }
 updStatus(`Версія ${APP_VERSION}`);
@@ -1340,9 +1343,9 @@ function updStatus(t) {
   ['#updSub', '#updSub2'].forEach((sel) => { const e = $(sel); if (e) e.textContent = t; });
 }
 async function checkUpdate() {
-  const btn = $('#updBtn2');
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
-  const done = () => { if (btn) { btn.disabled = false; btn.textContent = 'Оновити'; } };
+  const btn = $('#updBtn');
+  if (btn) { btn.disabled = true; btn.classList.add('busy'); }   // іконку не чіпаємо, лише крутимо
+  const done = () => { if (btn) { btn.disabled = false; btn.classList.remove('busy'); } };
   const sub = { set textContent(t) { updStatus(t); } };
   if (!navigator.onLine) { sub.textContent = `Версія ${APP_VERSION} · немає інтернету`; toast('Немає інтернету — оновлення потребує звʼязку', 'warn'); done(); return; }
   sub.textContent = 'Перевіряю…';
