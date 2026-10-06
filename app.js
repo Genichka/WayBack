@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.12.1';
+const APP_VERSION = '1.12.2';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -136,12 +136,33 @@ function modal({ title, html, ok = 'Зберегти', cancel = 'Скасува�
     $('#mCancel').classList.toggle('hidden', !cancel);
     $('#modal').classList.remove('hidden');
     if (onOpen) onOpen($('#mBody'));
+    // торкнулись поля - клавіатура з'їсть половину екрана, тож підтягуємо поле вгору
+    $('#mBody').querySelectorAll('input, textarea').forEach((el) => {
+      el.addEventListener('focus', () => setTimeout(() => {
+        try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+      }, 260));
+    });
     const close = (val) => { $('#modal').classList.add('hidden'); $('#mOk').onclick = $('#mCancel').onclick = null; resolve(val); };
     $('#mOk').onclick = () => { const v = validate ? validate($('#mBody')) : true; if (v !== false && v !== undefined) close(v); };
     $('#mCancel').onclick = () => close(null);
   });
 }
 const confirmBox = (title, text, ok = 'Так') => modal({ title, html: `<p class="note" style="font-size:14px;color:var(--text)">${text}</p>`, ok, validate: () => true });
+
+/* Клавіатура не зменшує звичайне вікно, тому міряємо видиму частину самі -
+   модальне вікно за нею підлаштовується і кнопки лишаються на видноті. */
+(() => {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const sync = () => {
+    const r = document.documentElement.style;
+    r.setProperty('--vvh', Math.round(vv.height) + 'px');
+    r.setProperty('--vvt', Math.round(vv.offsetTop) + 'px');
+  };
+  vv.addEventListener('resize', sync);
+  vv.addEventListener('scroll', sync);
+  sync();
+})();
 
 /* ---------- theme ---------- */
 function applyTheme() {
@@ -452,7 +473,7 @@ async function newPointDialog(lat, lon, opts = {}) {
   const res = await modal({
     title: opts.coords ? 'Точка за координатами' : 'Нова точка',
     html: pointForm({ name: first ? 'Машина' : 'Точка ' + (S.points.length + 1), icon: first ? '🚗' : '🍄', showTarget: true, tgt: first || !S.targetId, coordsInput: opts.coords }),
-    onOpen: (b) => { bindEmoji(b); if (!opts.coords) b.querySelector('#fName').select(); },
+    onOpen: (b) => bindEmoji(b),
     validate: (b) => {
       const f = readForm(b);
       if (opts.coords) {
@@ -1549,7 +1570,7 @@ async function findPlaceDialog() {
   const got = await modal({
     title: 'Зберегти точку',
     html: pointForm({ name: res.name ? res.name.slice(0, 40) : 'Точка ' + (S.points.length + 1), icon: '📍', showTarget: true, tgt: first || !S.targetId }),
-    onOpen: (b) => { bindEmoji(b); b.querySelector('#fName').select(); },
+    onOpen: (b) => bindEmoji(b),
     validate: (b) => readForm(b),
   });
   if (!got) return;
