@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.12.2';
+const APP_VERSION = '1.12.3';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -445,6 +445,25 @@ function addPoint({ name, icon, lat, lon }, makeTarget) {
 function setTarget(id) { S.targetId = id; S.arrived = false; savePoints(); renderPoints(); renderPointList(); updateAll(); }
 
 const EMOJIS = ['🚗', '🍄', '🏠', '⛺', '🌲', '💧', '⭐', '📍', '⚠️', '🎣'];
+/* Підпис до кожного значка. Обрав гриб - назва стає «Гриб», а не лишається «Машина». */
+const EMOJI_NAME = {
+  '🚗': 'Машина', '🍄': 'Гриб', '🏠': 'Дім', '⛺': 'Табір', '🌲': 'Ліс',
+  '💧': 'Вода', '⭐': 'Цікаве', '📍': 'Точка', '⚠️': 'Небезпека', '🎣': 'Риболовля',
+};
+/** Вільна назва для значка: «Гриб», далі «Гриб 2», «Гриб 3»… */
+function autoName(icon) {
+  const base = EMOJI_NAME[icon] || 'Точка';
+  const taken = new Set(S.points.map((p) => (p.name || '').trim().toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let i = 2; i < 999; i++) if (!taken.has(`${base} ${i}`.toLowerCase())) return `${base} ${i}`;
+  return base;
+}
+const isAutoName = (v) => {
+  const t = (v || '').trim().toLowerCase();
+  if (!t) return true;
+  return Object.values(EMOJI_NAME).some((n) => t === n.toLowerCase() || new RegExp(`^${n.toLowerCase()} \\d+$`).test(t))
+      || /^точка \d+$/.test(t);
+};
 function pointForm(p) {
   return `<input class="inp" id="fName" maxlength="40" placeholder="Назва" value="${esc(p.name || '')}">
     <div class="emojis" id="fEmo">${EMOJIS.map((e) => `<button type="button" data-e="${e}" class="${e === p.icon ? 'on' : ''}">${e}</button>`).join('')}</div>
@@ -452,9 +471,12 @@ function pointForm(p) {
     ${p.showTarget ? `<label class="chk"><input type="checkbox" class="sw" id="fTgt" ${p.tgt ? 'checked' : ''}> Повертатись сюди (ціль)</label>` : ''}`;
 }
 function bindEmoji(body) {
+  const nameEl = body.querySelector('#fName');
+  if (nameEl) nameEl.addEventListener('input', () => { nameEl.dataset.mine = '1'; });  // свою назву не чіпаємо
   body.querySelector('#fEmo').onclick = (e) => {
     const b = e.target.closest('button'); if (!b) return;
     body.querySelectorAll('#fEmo button').forEach((x) => x.classList.toggle('on', x === b));
+    if (nameEl && !nameEl.dataset.mine && isAutoName(nameEl.value)) nameEl.value = autoName(b.dataset.e);
   };
 }
 function readForm(body) {
@@ -472,7 +494,7 @@ async function newPointDialog(lat, lon, opts = {}) {
   const first = S.points.length === 0;
   const res = await modal({
     title: opts.coords ? 'Точка за координатами' : 'Нова точка',
-    html: pointForm({ name: first ? 'Машина' : 'Точка ' + (S.points.length + 1), icon: first ? '🚗' : '🍄', showTarget: true, tgt: first || !S.targetId, coordsInput: opts.coords }),
+    html: pointForm({ name: autoName(first ? '🚗' : '🍄'), icon: first ? '🚗' : '🍄', showTarget: true, tgt: first || !S.targetId, coordsInput: opts.coords }),
     onOpen: (b) => bindEmoji(b),
     validate: (b) => {
       const f = readForm(b);
@@ -1569,7 +1591,7 @@ async function findPlaceDialog() {
   const first = S.points.length === 0;
   const got = await modal({
     title: 'Зберегти точку',
-    html: pointForm({ name: res.name ? res.name.slice(0, 40) : 'Точка ' + (S.points.length + 1), icon: '📍', showTarget: true, tgt: first || !S.targetId }),
+    html: pointForm({ name: res.name ? res.name.slice(0, 40) : autoName('📍'), icon: '📍', showTarget: true, tgt: first || !S.targetId }),
     onOpen: (b) => bindEmoji(b),
     validate: (b) => readForm(b),
   });
