@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.12.3';
+const APP_VERSION = '1.13.1';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -9,19 +9,27 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&
 const LS = {
   get(k, d) { try { const v = localStorage.getItem('wb.' + k); return v == null ? d : JSON.parse(v); } catch (e) { return d; } },
   set(k, v) {
-    try { localStorage.setItem('wb.' + k, JSON.stringify(v)); return true; }
+    const raw = (() => { try { return JSON.stringify(v); } catch (e) { return null; } })();
+    if (raw == null) return false;
+    try { localStorage.setItem('wb.' + k, raw); return true; }
     catch (e) {
-      // памʼять скінчилась: прибираємо найстаріший трек і пробуємо ще раз
-      if (typeof S !== 'undefined' && S.tracks && S.tracks.length > 1) {
-        S.tracks.pop();
+      // Жертвувати треками можна ЛИШЕ коли браузер прямо каже «місця немає».
+      // Приватний режим чи вимкнене сховище - теж помилка, але історію там чіпати не можна.
+      const quota = !!e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+                            || e.code === 22 || e.code === 1014);
+      if (!quota) { toast('Не вдалося зберегти дані на цьому пристрої', 'warn'); return false; }
+      if (typeof S === 'undefined' || !S.tracks) { toast('Памʼять заповнена', 'warn'); return false; }
+      let dropped = 0;
+      while (S.tracks.length > 1 && dropped < 20) {     // звільняємо місце найстарішими треками
+        S.tracks.pop(); dropped++;
         try {
           localStorage.setItem('wb.tracks', JSON.stringify(S.tracks));
-          if (k !== 'tracks') localStorage.setItem('wb.' + k, JSON.stringify(v));
-          toast('Памʼять була заповнена — прибрано найстаріший трек', 'warn');
+          if (k !== 'tracks') localStorage.setItem('wb.' + k, raw);
+          toast(`Памʼять була заповнена — прибрано найстаріших треків: ${dropped}`, 'warn');
           return true;
-        } catch (e2) { /* не допомогло */ }
+        } catch (e2) { /* ще мало місця - пробуємо далі */ }
       }
-      toast('Не вдалося зберегти дані — памʼять заповнена', 'warn');
+      toast('Не вдалося зберегти — памʼять заповнена', 'warn');
       return false;
     }
   },
@@ -42,7 +50,7 @@ const TILE_CACHE = 'wayback-tiles';
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 
 /* ---------- state ---------- */
-const DEF_SETTINGS = { v: 3, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, autorec: true, radius: 3, zmax: 16, rmode: 'track', profile: 'city' };
+const DEF_SETTINGS = { v: 4, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, autorec: true, radius: 3, zmax: 16, rmode: 'route', rmodeBy: { city: 'route', forest: 'track', mount: 'track' }, profile: 'city' };
 
 /* Профіль середовища. Міняє не лише підпис, а й поведінку:
    layer   - шар карти за замовчуванням
@@ -50,16 +58,27 @@ const DEF_SETTINGS = { v: 3, layer: 'osm', theme: 'dark', wake: true, vibrate: t
    maxAcc  - гірша похибка GPS, за якої точку ще пишемо (під кроною вона велика)
    arrive  - радіус "ти на місці", м */
 const PROFILES = {
-  city:   { name: 'Місто', ico: '🏙️', layer: 'osm',  minStep: 8, maxAcc: 40, arrive: 15,
+  city:   { name: 'Місто', ico: '🏙️', layer: 'osm',  rmode: 'route', minStep: 8, maxAcc: 40, arrive: 15,
             info: 'Дороги й вулиці, схема карти. Повернення вулицями — потрібен інтернет.' },
-  forest: { name: 'Ліс',   ico: '🌲', layer: 'topo', minStep: 5, maxAcc: 60, arrive: 25,
+  forest: { name: 'Ліс',   ico: '🌲', layer: 'topo', rmode: 'track', minStep: 5, maxAcc: 60, arrive: 25,
             info: 'Ведення своїм треком, топокарта, густіший запис. Завантаж район заздалегідь.' },
-  mount:  { name: 'Гори',  ico: '⛰️', layer: 'topo', minStep: 4, maxAcc: 60, arrive: 30,
+  mount:  { name: 'Гори',  ico: '⛰️', layer: 'topo', rmode: 'track', minStep: 4, maxAcc: 60, arrive: 30,
             info: 'Тільки трек: пряма в горах може вести через урвище. Показано висоту.' },
 };
 const PROF = () => PROFILES[S.settings.profile] || PROFILES.city;
 const S = {
-  settings: (() => { const st = Object.assign({}, DEF_SETTINGS, LS.get('settings', {})); if (!(st.v >= 2)) { st.v = 2; st.layer = 'osm'; } return st; })(),
+  settings: (() => {
+    const st = Object.assign({}, DEF_SETTINGS, LS.get('settings', {}));
+    if (!(st.v >= 2)) { st.v = 2; st.layer = 'osm'; }
+    // v4: спосіб повернення став окремим для кожного профілю.
+    // У місті типово «дорогами», щоб не вести через квартали.
+    if (!(st.v >= 4) || !st.rmodeBy) {
+      st.rmodeBy = Object.assign({}, DEF_SETTINGS.rmodeBy);
+      st.rmode = st.rmodeBy[st.profile] || 'route';
+      st.v = 4;
+    }
+    return st;
+  })(),
   points: LS.get('points', []),
   targetId: LS.get('target', null),
   track: LS.get('track', null),        // активний трек {id,start,pts:[[lat,lon,t,acc,alt]],dist}
@@ -892,7 +911,10 @@ function drawChevrons() {
 function setReturnMode(m, silent) {
   if (m === 'direct' && S.settings.profile === 'mount' && !silent)
     toast('⛰️ У горах пряма може вести через урвище — надійніше трек', 'warn');
-  S.settings.rmode = m; saveSettings();
+  S.settings.rmode = m;
+  if (!S.settings.rmodeBy) S.settings.rmodeBy = {};
+  S.settings.rmodeBy[S.settings.profile] = m;   // у кожного профілю свій спосіб
+  saveSettings();
   syncModeSeg();
   S.rpath = null; S.rsrc = null; S.rpathLen = null; S.rpathFrom = null; S.rErr = null;
   routeCase.setLatLngs([]); routeLine.setLatLngs([]); chevrons.clearLayers();
@@ -939,6 +961,8 @@ function setProfile(id, silent) {
   saveSettings();
   setLayer(p.layer);
   if (typeof renderMapTab === 'function' && $('#layerSeg')) renderMapTab();
+  const want = (S.settings.rmodeBy || {})[id] || p.rmode || 'track';
+  if (want !== S.settings.rmode) setReturnMode(want, true);
   syncProfSeg();
   if (!silent) toast(`${p.ico} Режим: ${p.name}`, 'good');
 }
@@ -1351,20 +1375,39 @@ $('#importFile').onchange = async (e) => {
 };
 function importGpx(text) {
   const doc = new DOMParser().parseFromString(text, 'application/xml');
-  let np = 0;
-  doc.querySelectorAll('wpt').forEach((w) => {
-    const n = w.querySelector('name'); addPoint({ name: n ? n.textContent.slice(0, 40) : 'Точка', icon: '📍', lat: +w.getAttribute('lat'), lon: +w.getAttribute('lon') }); np++;
+  // Чужий файл може бути яким завгодно: порожні, NaN чи неможливі координати.
+  // Пропускаємо лише придатне, решту мовчки відкидаємо й кажемо скільки.
+  const okLL = (a, b) => Number.isFinite(a) && Number.isFinite(b)
+    && Math.abs(a) <= 90 && Math.abs(b) <= 180 && !(a === 0 && b === 0);
+  const MAX_WPT = 300, MAX_TRKPT = 20000;
+  let np = 0, skipped = 0;
+  [...doc.querySelectorAll('wpt')].slice(0, MAX_WPT).forEach((w) => {
+    const la = +w.getAttribute('lat'), lo = +w.getAttribute('lon');
+    if (!okLL(la, lo)) { skipped++; return; }
+    const n = w.querySelector('name');
+    addPoint({ name: n ? n.textContent.slice(0, 40) : 'Точка', icon: '📍', lat: la, lon: lo }); np++;
   });
-  const pts = [...doc.querySelectorAll('trkpt, rtept')].map((p, i) => {
+  const all = [...doc.querySelectorAll('trkpt, rtept')];
+  const pts = [];
+  for (let i = 0; i < all.length && pts.length < MAX_TRKPT; i++) {
+    const p = all[i];
+    const la = +p.getAttribute('lat'), lo = +p.getAttribute('lon');
+    if (!okLL(la, lo)) { skipped++; continue; }
     const t = p.querySelector('time'), e = p.querySelector('ele');
-    return [+p.getAttribute('lat'), +p.getAttribute('lon'), t ? Date.parse(t.textContent) : Date.now() + i * 1000, 0, e ? Math.round(+e.textContent) : null];
-  });
+    const ts = t ? Date.parse(t.textContent) : NaN;
+    const el = e ? +e.textContent : NaN;
+    pts.push([la, lo, Number.isFinite(ts) ? ts : Date.now() + i * 1000, 0,
+              Number.isFinite(el) ? Math.round(el) : null]);
+  }
   if (pts.length > 1) {
     let d = 0; for (let i = 1; i < pts.length; i++) d += dist(pts[i - 1], pts[i]);
     S.tracks.unshift({ id: 't' + Date.now(), start: pts[0][2], end: pts[pts.length - 1][2], pts, dist: d, target: 'імпорт GPX' });
+    trimTracks();                        // щоб імпорт не переповнив памʼять
     LS.set('tracks', S.tracks);
   }
-  toast(`GPX: ${np} точок, ${pts.length > 1 ? 1 : 0} трек`, 'good');
+  if (!np && pts.length < 2) { toast('У файлі не знайшлось придатних координат', 'warn'); return; }
+  toast(`GPX: ${np} точок, ${pts.length > 1 ? 1 : 0} трек`
+        + (skipped ? ` · пропущено хибних: ${skipped}` : ''), 'good');
 }
 $('#exitBtn').onclick = async () => {
   if (S.track) {
