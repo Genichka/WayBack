@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.12.0';
+const APP_VERSION = '1.12.1';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -371,6 +371,7 @@ function startTrack(silent) {
     const pt = addPoint({ name: 'Машина', icon: '🚗', lat: S.pos.lat, lon: S.pos.lon }, true);
     toast(`🚗 Точку «${pt.name}» позначено`, 'good');
   }
+  if (!silent) S.autoOff = false;
   S.track = { id: 't' + Date.now(), start: Date.now(), pts: [], dist: 0, target: target() ? target().name : null };
   trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   recordPoint(); saveTrack(true);
@@ -381,6 +382,7 @@ function startTrack(silent) {
 /** Слід має писатись сам, інакше вертатись не буде по чому.
  *  Вмикається з першим надійним сигналом GPS. */
 function autoRecord() {
+  if (S.autoOff) return;                    // людина натиснула «Стоп» - не лізем
   if (!S.settings.autorec || S.track || S.pendingStart || S.gpsDenied) return;
   if (!S.pos || S.pos.acc > 50) return;
   startTrack(true);
@@ -388,6 +390,7 @@ function autoRecord() {
 async function stopTrack() {
   const ok = await confirmBox('Завершити запис?', `Пройдено ${fmtDist(S.track.dist)} за ${fmtDur(Date.now() - S.track.start)}. Трек збережеться в історії.`, 'Завершити');
   if (!ok) return;
+  S.autoOff = true;                         // більше не починати самому
   const tr = S.track; tr.end = Date.now();
   if (tr.pts.length > 1) {
     S.tracks.unshift(tr);
@@ -398,7 +401,9 @@ async function stopTrack() {
   S.track = null; saveTrack(true);
   trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   if (!S.navOpen) wake(false);
-  updateTrackBtn(); updateAll(); toast('Трек збережено', 'good');
+  updateTrackBtn(); updateAll();
+  toast(S.settings.autorec ? 'Запис зупинено. Слід більше не пишеться — натисни «Старт»'
+                           : 'Трек збережено', 'good');
 }
 function updateTrackBtn() {
   const b = $('#trackBtn'), on = !!S.track;
@@ -1280,7 +1285,7 @@ $('#setVib').onchange = (e) => { S.settings.vibrate = e.target.checked; saveSett
 $('#setAuto').onchange = (e) => { S.settings.auto = e.target.checked; saveSettings(); };
 $('#setAutoRec').onchange = (e) => {
   S.settings.autorec = e.target.checked; saveSettings();
-  if (S.settings.autorec) autoRecord();
+  if (S.settings.autorec) { S.autoOff = false; autoRecord(); }
 };
 $('#exportBtn').onclick = () => download(`wayback-backup-${stamp(Date.now())}.json`, JSON.stringify({ app: 'wayback', v: 1, points: S.points, target: S.targetId, tracks: S.tracks }, null, 1), 'application/json');
 $('#importBtn').onclick = () => $('#importFile').click();
