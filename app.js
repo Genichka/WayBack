@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.10.0';
+const APP_VERSION = '1.11.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -42,20 +42,19 @@ const TILE_CACHE = 'wayback-tiles';
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 
 /* ---------- state ---------- */
-const DEF_SETTINGS = { v: 2, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, radius: 3, zmax: 16, rmode: 'direct', profile: 'city' };
+const DEF_SETTINGS = { v: 3, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, autorec: true, radius: 3, zmax: 16, rmode: 'track', profile: 'city' };
 
 /* Профіль середовища. Міняє не лише підпис, а й поведінку:
    layer   - шар карти за замовчуванням
-   rmode   - спосіб повернення за замовчуванням
    minStep - мінімальний крок між точками треку, м (у лісі густіше - точніше назад)
    maxAcc  - гірша похибка GPS, за якої точку ще пишемо (під кроною вона велика)
    arrive  - радіус "ти на місці", м */
 const PROFILES = {
-  city:   { name: 'Місто', ico: '🏙️', layer: 'osm',  rmode: 'route', minStep: 8, maxAcc: 40, arrive: 15,
+  city:   { name: 'Місто', ico: '🏙️', layer: 'osm',  minStep: 8, maxAcc: 40, arrive: 15,
             info: 'Дороги й вулиці, схема карти. Повернення вулицями — потрібен інтернет.' },
-  forest: { name: 'Ліс',   ico: '🌲', layer: 'topo', rmode: 'track', minStep: 5, maxAcc: 60, arrive: 25,
+  forest: { name: 'Ліс',   ico: '🌲', layer: 'topo', minStep: 5, maxAcc: 60, arrive: 25,
             info: 'Ведення своїм треком, топокарта, густіший запис. Завантаж район заздалегідь.' },
-  mount:  { name: 'Гори',  ico: '⛰️', layer: 'topo', rmode: 'track', minStep: 4, maxAcc: 60, arrive: 30,
+  mount:  { name: 'Гори',  ico: '⛰️', layer: 'topo', minStep: 4, maxAcc: 60, arrive: 30,
             info: 'Тільки трек: пряма в горах може вести через урвище. Показано висоту.' },
 };
 const PROF = () => PROFILES[S.settings.profile] || PROFILES.city;
@@ -272,6 +271,7 @@ function onPos(p) {
   else if (S.follow) map.panTo(ll, { animate: true });
 
   if (S.pendingStart && a <= 50) { S.pendingStart = false; startTrack(); }
+  autoRecord();
   recordPoint();
   updateAll();
 }
@@ -359,18 +359,29 @@ function recordPoint() {
   trackLine.addLatLng([cur[0], cur[1]]); trackCase.addLatLng([cur[0], cur[1]]);
   saveTrack();
 }
-function startTrack() {
-  if (S.gpsDenied) { gpsHelp(); return; }
-  if (!S.pos) { S.pendingStart = true; toast('Чекаю сигнал GPS…'); updateTrackBtn(); return; }
-  if (!target() && S.settings.auto) {
+function startTrack(silent) {
+  if (S.gpsDenied) { if (!silent) gpsHelp(); return; }
+  if (!S.pos) {
+    if (silent) return;
+    S.pendingStart = true; toast('Чекаю сигнал GPS…'); updateTrackBtn(); return;
+  }
+  if (!silent && !target() && S.settings.auto) {
     const pt = addPoint({ name: 'Машина', icon: '🚗', lat: S.pos.lat, lon: S.pos.lon }, true);
     toast(`🚗 Точку «${pt.name}» позначено`, 'good');
   }
   S.track = { id: 't' + Date.now(), start: Date.now(), pts: [], dist: 0, target: target() ? target().name : null };
   trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   recordPoint(); saveTrack(true);
-  wake(true); vibrate(40);
+  wake(true); if (!silent) vibrate(40);
   updateTrackBtn(); updateAll();
+}
+
+/** Слід має писатись сам, інакше вертатись не буде по чому.
+ *  Вмикається з першим надійним сигналом GPS. */
+function autoRecord() {
+  if (!S.settings.autorec || S.track || S.pendingStart || S.gpsDenied) return;
+  if (!S.pos || S.pos.acc > 50) return;
+  startTrack(true);
 }
 async function stopTrack() {
   const ok = await confirmBox('Завершити запис?', `Пройдено ${fmtDist(S.track.dist)} за ${fmtDur(Date.now() - S.track.start)}. Трек збережеться в історії.`, 'Завершити');
@@ -838,7 +849,7 @@ function setReturnMode(m, silent) {
   if (m === 'track') {
     const p = buildTrackPath();
     if (p) { S.rpath = p; S.rsrc = 'track'; S.rpathLen = null; if (!silent) toast('👣 Веду твоїм треком', 'good'); }
-    else if (!silent) toast('Немає записаного треку до цієї точки — лишаю пряму', 'warn');
+    else if (!silent) toast(S.track ? 'Слід ще короткий — поки веду прямою' : 'Немає записаного сліду — поки веду прямою', 'warn');
   } else if (m === 'route') {
     requestRoute(true);
     if (!silent) toast('🛣️ Шукаю шлях дорогами…');
@@ -878,7 +889,6 @@ function setProfile(id, silent) {
   saveSettings();
   setLayer(p.layer);
   if (typeof renderMapTab === 'function' && $('#layerSeg')) renderMapTab();
-  setReturnMode(p.rmode, true);
   syncProfSeg();
   if (!silent) toast(`${p.ico} Режим: ${p.name}`, 'good');
 }
@@ -1229,10 +1239,35 @@ $('#fabLayer').onclick = () => {
   setLayer(next); toast('Карта: ' + LAYERS[next].name);
 };
 
+/** Прибрати намальоване: поточний слід і побудований шлях назад.
+ *  Запис не зупиняємо - він просто починається заново з цього місця,
+ *  інакше вертатись знову не буде по чому. */
+async function clearCurrent() {
+  const hasTrack = S.track && S.track.pts.length > 1;
+  const hasPath = !!(S.rpath && S.rpath.length > 1);
+  if (!hasTrack && !hasPath) { toast('Нічого очищати'); return; }
+  const txt = hasTrack
+    ? `Пройдене (${fmtDist(S.track.dist)}) буде стерто без збереження в історію. Запис продовжиться з цього місця.`
+    : 'Прибрати намальований шлях назад.';
+  if (!(await confirmBox('Очистити поточний слід?', txt, 'Очистити'))) return;
+
+  if (S.track) {                       // слід починаємо заново, запис не уриваємо
+    S.track.pts = []; S.track.dist = 0; S.track.start = Date.now();
+    trackLine.setLatLngs([]); trackCase.setLatLngs([]);
+    if (S.pos) recordPoint();
+    saveTrack(true);
+  }
+  S.rpath = null; S.rsrc = null; S.rpathLen = null; S.rpathFrom = null; S.rErr = null;
+  routeCase.setLatLngs([]); routeLine.setLatLngs([]); chevrons.clearLayers();
+  drawReturn(); updateTrackBtn(); updateAll();
+  toast('Очищено', 'good');
+}
+$('#fabClear').onclick = clearCurrent;
+
 /* ---------- settings ---------- */
 function renderSettings() {
   seg($('#themeSeg'), [['dark', 'Темна'], ['light', 'Світла']], S.settings.theme, (v) => { S.settings.theme = v; saveSettings(); applyTheme(); });
-  $('#setWake').checked = S.settings.wake; $('#setVib').checked = S.settings.vibrate; $('#setAuto').checked = S.settings.auto;
+  $('#setWake').checked = S.settings.wake; $('#setVib').checked = S.settings.vibrate; $('#setAuto').checked = S.settings.auto; $('#setAutoRec').checked = S.settings.autorec;
   updStatus(`Версія ${APP_VERSION}`);
   const vv = $('#updVer'); if (vv) vv.textContent = `WayBack v${APP_VERSION}`;
   $('#verNote').textContent = `WayBack v${APP_VERSION} · дані зберігаються лише на цьому пристрої`;
@@ -1240,6 +1275,10 @@ function renderSettings() {
 $('#setWake').onchange = (e) => { S.settings.wake = e.target.checked; saveSettings(); if (!e.target.checked) wake(false); else if (S.track || S.navOpen) wake(true); };
 $('#setVib').onchange = (e) => { S.settings.vibrate = e.target.checked; saveSettings(); };
 $('#setAuto').onchange = (e) => { S.settings.auto = e.target.checked; saveSettings(); };
+$('#setAutoRec').onchange = (e) => {
+  S.settings.autorec = e.target.checked; saveSettings();
+  if (S.settings.autorec) autoRecord();
+};
 $('#exportBtn').onclick = () => download(`wayback-backup-${stamp(Date.now())}.json`, JSON.stringify({ app: 'wayback', v: 1, points: S.points, target: S.targetId, tracks: S.tracks }, null, 1), 'application/json');
 $('#importBtn').onclick = () => $('#importFile').click();
 $('#importFile').onchange = async (e) => {
