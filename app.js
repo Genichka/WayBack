@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.13.1';
+const APP_VERSION = '1.14.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -50,7 +50,7 @@ const TILE_CACHE = 'wayback-tiles';
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 
 /* ---------- state ---------- */
-const DEF_SETTINGS = { v: 4, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, autorec: true, radius: 3, zmax: 16, rmode: 'route', rmodeBy: { city: 'route', forest: 'track', mount: 'track' }, profile: 'city' };
+const DEF_SETTINGS = { v: 4, layer: 'osm', theme: 'dark', wake: true, vibrate: true, auto: true, autorec: true, radius: 3, zmax: 16, rmode: 'route', travel: 'foot', rmodeBy: { city: 'route', forest: 'track', mount: 'track' }, profile: 'city' };
 
 /* Профіль середовища. Міняє не лише підпис, а й поведінку:
    layer   - шар карти за замовчуванням
@@ -391,9 +391,13 @@ function recordPoint() {
   const last = tr.pts[tr.pts.length - 1];
   if (last) {
     const d = dist(last, cur), dt = (cur[2] - last[2]) / 1000;
-    if (d < Math.max(PROF().minStep, p.acc * 0.4)) return;
-    // стрибок GPS: ігноруємо, але якщо таких 3 поспіль — значить це реальний рух (напр. авто)
-    if (dt > 0 && d / dt > 15 && (S.jumps = (S.jumps || 0) + 1) < 3) return;
+    if (d < Math.max(PROF().minStep, TRAV().minStep, p.acc * 0.4)) return;
+    // Стрибок GPS - це НЕМОЖЛИВА швидкість, а не просто швидка.
+    // Межа 55 м/с ≈ 198 км/год: машина, потяг і велосипед проходять,
+    // а телепорт на сотні метрів за секунду - ні.
+    // (Раніше тут стояло 15 м/с = 54 км/год, і в авто справжній рух
+    //  вважався стрибком — слід виходив рваними прямими через квартали.)
+    if (dt > 0 && d / dt > 55 && (S.jumps = (S.jumps || 0) + 1) < 3) return;
     S.jumps = 0;
     tr.dist += d;
   }
@@ -821,13 +825,21 @@ function buildTrackPath() {
 }
 
 /* ---- маршрут дорогами (OSRM, пішохідний профіль) ---- */
-const ROUTE_URL = 'https://routing.openstreetmap.de/routed-foot/route/v1/foot/';
+/* Пішки й на авто маршрутизатор рахує по-різному: пішохідний профіль
+   веде стежками й дворами, де машиною не проїхати. */
+const TRAVEL = {
+  foot: { name: 'Пішки', ico: '🚶', url: 'https://routing.openstreetmap.de/routed-foot/route/v1/foot/',
+          minStep: 0,  info: 'Маршрут дорогами веде і стежками, і дворами — найкоротше для пішохода.' },
+  car:  { name: 'Авто',  ico: '🚗', url: 'https://routing.openstreetmap.de/routed-car/route/v1/driving/',
+          minStep: 20, info: 'Маршрут дорогами враховує проїзд і напрямок руху. Слід пишеться рідше.' },
+};
+const TRAV = () => TRAVEL[S.settings.travel] || TRAVEL.foot;
 let routeAbort = null;
 
 async function fetchRoute(from, to) {
   if (routeAbort) routeAbort.abort();
   routeAbort = new AbortController();
-  const u = `${ROUTE_URL}${from[1].toFixed(6)},${from[0].toFixed(6)};${to[1].toFixed(6)},${to[0].toFixed(6)}?overview=full&geometries=geojson&alternatives=false&steps=false`;
+  const u = `${TRAV().url}${from[1].toFixed(6)},${from[0].toFixed(6)};${to[1].toFixed(6)},${to[0].toFixed(6)}?overview=full&geometries=geojson&alternatives=false&steps=false`;
   const to_ = setTimeout(() => routeAbort && routeAbort.abort(), 15000);
   try {
     const r = await fetch(u, { signal: routeAbort.signal });
@@ -945,6 +957,29 @@ function refreshReturn() {
   }
 }
 
+
+/* ---------- спосіб пересування ---------- */
+function syncTravSeg() {
+  document.querySelectorAll('#travSeg button').forEach((b) =>
+    b.classList.toggle('on', b.dataset.t === S.settings.travel));
+  const el = $('#travInfo');
+  if (el) el.textContent = TRAV().info;
+}
+function setTravel(id, silent) {
+  if (!TRAVEL[id] || id === S.settings.travel) { syncTravSeg(); return; }
+  S.settings.travel = id; saveSettings();
+  syncTravSeg();
+  if (S.settings.rmode === 'route') {      // маршрут рахувався іншим профілем - перебудувати
+    S.rpath = null; S.rsrc = null; S.rpathLen = null; S.rpathFrom = null;
+    requestRoute(true);
+  }
+  updateAll();
+  if (!silent) toast(`${TRAV().ico} ${TRAV().name}`, 'good');
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('#travSeg button');
+  if (b) setTravel(b.dataset.t);
+});
 
 /* ---------- профіль середовища ---------- */
 function syncProfSeg() {
@@ -1079,7 +1114,8 @@ function renderNav() {
     if (m === 'direct') info.textContent = 'Пряма — найкоротший напрям, без урахування доріг і перешкод.';
     else if (S.rBusy) info.textContent = 'Будую маршрут…';
     else if (S.rOff) info.innerHTML = '<b style="color:var(--orange)">Ти осторонь маршруту</b> — зеленим показано, як до нього вийти.';
-    else if (S.rpath) info.textContent = m === 'track' ? 'Веду назад твоїм же слідом.' : 'Веду дорогами й стежками.';
+    else if (S.rpath) info.textContent = m === 'track' ? 'Веду назад твоїм же слідом.'
+      : (S.settings.travel === 'car' ? 'Веду дорогами для авто.' : 'Веду дорогами й стежками.');
     else info.textContent = m === 'track' ? 'Немає записаного треку — веду по прямій.' : 'Маршрут недоступний — веду по прямій.';
   }
   if (hasH) {
@@ -1100,7 +1136,7 @@ function syncModeSeg() {
     b.classList.toggle('on', b.dataset.m === S.settings.rmode));
 }
 syncModeSeg();
-syncProfSeg();
+syncProfSeg(); syncTravSeg();
 
 function buildTicks() {
   let s = '';
