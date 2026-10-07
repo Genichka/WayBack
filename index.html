@@ -46,6 +46,10 @@
     <div class="p-title" id="accTitle">GPS ±</div>
     <div class="p-val" id="vAcc">—</div>
   </div>
+  <button class="panel tap" id="histBtn" title="Мої прогулянки">
+    <div class="p-title">Історія</div>
+    <div class="p-val c-violet" id="vHist">0</div>
+  </button>
 </section>
 
 <main class="map-wrap">
@@ -140,7 +144,6 @@
     <div class="tabs" id="tabs">
       <button data-tab="points" class="on">Точки</button>
       <button data-tab="map">Карта</button>
-      <button data-tab="tracks">Історія</button>
       <button data-tab="settings">Інше</button>
     </div>
 
@@ -148,7 +151,6 @@
       <p class="note lead">Точка — місце, куди додаток тебе поверне. Значок 🎯 робить точку ціллю.</p>
       <div class="list" id="pointList"></div>
       <div class="row-btns">
-        <button class="btn primary" id="addHereBtn">📍 Тут, де я</button>
         <button class="btn" id="addCoordBtn">🔎 Адреса</button>
         <button class="btn" id="scanBtn">📷 QR-код</button>
       </div>
@@ -184,11 +186,6 @@
       <div class="sec-title">Вигляд карти</div>
       <div class="seg" id="layerSeg"></div>
       <p class="note">Зазвичай його ставить профіль «Де ти зараз», але можна обрати вручну.</p>
-    </div>
-
-    <div class="tab hidden" id="tab-tracks">
-      <p class="note lead">Твої прогулянки. 👁️ показує слід на карті, ⬇️ зберігає у файл GPX.</p>
-      <div class="list" id="trackList"></div>
     </div>
 
     <div class="tab hidden" id="tab-settings">
@@ -237,6 +234,19 @@
       <p class="note">⚠️ Браузер може зупинити GPS, коли екран вимкнено або додаток згорнуто. Під час прогулянки тримай WayBack відкритим (екран можна не дивитися — він не згасне). Дані зберігаються лише на цьому пристрої.</p>
       <p class="note" id="verNote"></p>
     </div>
+  </div>
+</div>
+
+<!-- історія прогулянок: відкривається панеллю «Історія» на головному екрані -->
+<div class="sheet hidden" id="histSheet">
+  <div class="sheet-bg" data-hclose></div>
+  <div class="sheet-body">
+    <div class="sheet-head">
+      <h2>Мої прогулянки</h2>
+      <button class="icon-btn" data-hclose aria-label="Закрити">✕</button>
+    </div>
+    <p class="note lead">👁️ показує слід на карті, ⬇️ зберігає у файл GPX.</p>
+    <div class="list" id="trackList"></div>
   </div>
 </div>
 

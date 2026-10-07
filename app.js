@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.14.0';
+const APP_VERSION = '1.15.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -1060,6 +1060,7 @@ function updateTimer() {
     $('#vWalk').textContent = fmtDist(S.track.dist);
     $('#vTime').textContent = fmtDur(Date.now() - S.track.start);
   } else { $('#vWalk').textContent = '—'; $('#vTime').textContent = '—'; }
+  { const h = $('#vHist'); if (h) h.textContent = S.tracks.length || '—'; }
 }
 setInterval(updateTimer, 1000);
 
@@ -1534,13 +1535,15 @@ function showTab(tab) {
   document.querySelectorAll('.tab').forEach((t) => t.classList.toggle('hidden', t.id !== 'tab-' + tab));
   if (tab === 'points') renderPointList();
   if (tab === 'map') renderMapTab();
-  if (tab === 'tracks') renderTrackList();
   if (tab === 'settings') renderSettings();
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); };
 $('#sheet').onclick = (e) => { if (e.target.closest('[data-close]')) closeSheet(); };
 $('#menuBtn').onclick = () => openSheet();
-$('#addHereBtn').onclick = () => { closeSheet(); markHere(); };
+function openHist() { closeSheet(); $('#histSheet').classList.remove('hidden'); renderTrackList(); }
+function closeHist() { $('#histSheet').classList.add('hidden'); }
+$('#histBtn').onclick = openHist;
+$('#histSheet').onclick = (e) => { if (e.target.closest('[data-hclose]')) closeHist(); };
 $('#scanBtn').onclick = () => { closeSheet(); setTimeout(scanQr, 120); };
 $('#addCoordBtn').onclick = () => { closeSheet(); findPlaceDialog(); };
 

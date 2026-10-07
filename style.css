@@ -58,7 +58,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .brand-txt small { display: block; color: var(--muted); font-size: 11px; margin-top: -2px; }
 .icon-btn {
   width: 36px; height: 36px; border-radius: 9px; border: 1px solid var(--border);
-  background: var(--panel2); color: var(--strong);
+  background: var(--panel2); color: var(--strong); font-size: 17px;
   display: grid; place-items: center; flex: none;
 }
 .icon-btn svg { width: 19px; height: 19px; display: block; }
@@ -79,7 +79,11 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .gps.bad i { background: var(--red); }
 
 /* stat panels */
-.stats { display: grid; grid-template-columns: 1.35fr 1fr 1fr .85fr; gap: 6px; padding: 6px; background: var(--bg); }
+.stats { display: grid; grid-template-columns: 1.3fr 1fr 1fr .8fr .72fr; gap: 5px; padding: 6px; background: var(--bg); }
+/* панель-кнопка: виглядає як сусіди, але натискається */
+.panel.tap { text-align: left; font: inherit; cursor: pointer; }
+.panel.tap:active { background: var(--panel2); transform: scale(.96); }
+.c-violet { color: #b388ff; }
 .panel {
   background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
   padding: 6px 8px 7px; min-width: 0;
