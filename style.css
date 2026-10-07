@@ -78,6 +78,20 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .gps.mid i { background: var(--yellow); }
 .gps.bad i { background: var(--red); }
 
+/* швидкі перемикачі під панелями: середовище і спосіб руху.
+   Один ряд, щоб не з'їдати карту. */
+.quick { display: flex; gap: 6px; padding: 0 6px 6px; background: var(--bg); }
+.quick .qseg { flex: 1 1 0; min-width: 0; }
+.quick .qseg:first-child { flex: 1.5 1 0; }
+.qseg button {
+  padding: 7px 2px; font-size: 12px; gap: 4px; min-width: 0;
+  display: flex; align-items: center; justify-content: center;
+  white-space: nowrap; overflow: hidden;
+}
+.qseg button span { font-size: 14px; }
+@media (max-width: 370px) { .qseg button { font-size: 11px; gap: 3px; } .qseg button span { font-size: 13px; } }
+@media (max-width: 345px) { .qseg button { font-size: 10px; gap: 2px; padding: 7px 1px; } .qseg button span { font-size: 12px; } }
+
 /* stat panels */
 .stats { display: grid; grid-template-columns: 1.3fr 1fr 1fr .8fr .72fr; gap: 5px; padding: 6px; background: var(--bg); }
 /* панель-кнопка: виглядає як сусіди, але натискається */

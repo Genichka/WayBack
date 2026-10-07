@@ -52,6 +52,18 @@
   </button>
 </section>
 
+<section class="quick" id="quick">
+  <div class="seg qseg" id="profSeg" aria-label="Де ти зараз">
+    <button data-p="city"><span>🏙️</span>Місто</button>
+    <button data-p="forest"><span>🌲</span>Ліс</button>
+    <button data-p="mount"><span>⛰️</span>Гори</button>
+  </div>
+  <div class="seg qseg" id="travSeg" aria-label="Як рухаєшся">
+    <button data-t="foot"><span>🚶</span>Пішки</button>
+    <button data-t="car"><span>🚗</span>Авто</button>
+  </div>
+</section>
+
 <main class="map-wrap">
   <div id="map"></div>
   <div class="fabs">
@@ -114,33 +126,6 @@
       <h2>Меню</h2>
       <button class="icon-btn" data-close aria-label="Закрити">✕</button>
     </div>
-    <details class="help" id="helpBox">
-      <summary>Як це працює</summary>
-      <ol class="help-steps">
-        <li><b>Познач точку</b> там, куди треба буде повернутись — авто, табір, стоянка.</li>
-        <li><b>Натисни «Старт»</b> і йди. Додаток запамʼятовує твій слід.</li>
-        <li><b>Натисни «Назад»</b> — стрілка й лінія на карті приведуть до точки.</li>
-      </ol>
-      <p class="note">Без інтернету все працює, якщо заздалегідь завантажити карту району — вкладка «Карта».</p>
-    </details>
-
-    <div class="prof">
-      <div class="prof-lbl">Де ти зараз</div>
-      <div class="seg prof-seg" id="profSeg">
-        <button data-p="city"><span>🏙️</span>Місто</button>
-        <button data-p="forest"><span>🌲</span>Ліс</button>
-        <button data-p="mount"><span>⛰️</span>Гори</button>
-      </div>
-      <div class="prof-info" id="profInfo"></div>
-
-      <div class="prof-lbl" style="margin-top:12px">Як рухаєшся</div>
-      <div class="seg prof-seg" id="travSeg">
-        <button data-t="foot"><span>🚶</span>Пішки</button>
-        <button data-t="car"><span>🚗</span>Авто</button>
-      </div>
-      <div class="prof-info" id="travInfo"></div>
-    </div>
-
     <div class="tabs" id="tabs">
       <button data-tab="points" class="on">Точки</button>
       <button data-tab="map">Карта</button>
@@ -189,6 +174,16 @@
     </div>
 
     <div class="tab hidden" id="tab-settings">
+      <details class="help" id="helpBox">
+      <summary>Як це працює</summary>
+      <ol class="help-steps">
+        <li><b>Познач точку</b> там, куди треба буде повернутись — авто, табір, стоянка.</li>
+        <li><b>Натисни «Старт»</b> і йди. Додаток запамʼятовує твій слід.</li>
+        <li><b>Натисни «Назад»</b> — стрілка й лінія на карті приведуть до точки.</li>
+      </ol>
+      <p class="note">Без інтернету все працює, якщо заздалегідь завантажити карту району — вкладка «Карта».</p>
+      </details>
+
       <div class="sec-title">Під час прогулянки</div>
       <div class="list">
         <label class="item">

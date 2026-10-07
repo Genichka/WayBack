@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.15.0';
+const APP_VERSION = '1.16.0';
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -974,7 +974,7 @@ function setTravel(id, silent) {
     requestRoute(true);
   }
   updateAll();
-  if (!silent) toast(`${TRAV().ico} ${TRAV().name}`, 'good');
+  if (!silent) toast(`${TRAV().ico} ${TRAV().name} — ${TRAV().info}`, 'good');
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('#travSeg button');
@@ -999,7 +999,7 @@ function setProfile(id, silent) {
   const want = (S.settings.rmodeBy || {})[id] || p.rmode || 'track';
   if (want !== S.settings.rmode) setReturnMode(want, true);
   syncProfSeg();
-  if (!silent) toast(`${p.ico} Режим: ${p.name}`, 'good');
+  if (!silent) toast(`${p.ico} ${p.name} — ${p.info}`, "good");
 }
 document.addEventListener('click', (e) => {
   const b = e.target.closest('#profSeg button');
