@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="wb_bg">#111217</color>
+    <style name="Theme.WayBack" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/wb_bg</item>
+        <item name="android:statusBarColor">@color/wb_bg</item>
+        <item name="android:navigationBarColor">@color/wb_bg</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
