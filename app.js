@@ -1,8 +1,13 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.17.0';
+const APP_VERSION = '1.18.0';
 const $ = (s) => document.querySelector(s);
+// Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
+const NATIVE = typeof window.WayBackNative !== 'undefined';
+const WEB_URL = 'https://genichka.github.io/WayBack/';
+const RAW_APP_JS = 'https://raw.githubusercontent.com/Genichka/WayBack/main/app.js';
+let nativeTimer = null;   // тут, а не нижче: LS.set викликається ще під час старту
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 /* ---------- storage ---------- */
@@ -11,7 +16,7 @@ const LS = {
   set(k, v) {
     const raw = (() => { try { return JSON.stringify(v); } catch (e) { return null; } })();
     if (raw == null) return false;
-    try { localStorage.setItem('wb.' + k, raw); return true; }
+    try { localStorage.setItem('wb.' + k, raw); nativeSyncSoon(k); return true; }
     catch (e) {
       // Жертвувати треками можна ЛИШЕ коли браузер прямо каже «місця немає».
       // Приватний режим чи вимкнене сховище - теж помилка, але історію там чіпати не можна.
@@ -557,7 +562,7 @@ async function deletePoint(id) {
   savePoints(); renderPoints(); renderPointList(); updateAll();
 }
 /* ---------- поділитись (Telegram, Viber, SMS…) ---------- */
-const appLink = (lat, lon, name) => `${location.origin}${location.pathname}?to=${lat.toFixed(6)},${lon.toFixed(6)}&n=${encodeURIComponent(name)}`;
+const appLink = (lat, lon, name) => `${NATIVE ? WEB_URL : location.origin + location.pathname}?to=${lat.toFixed(6)},${lon.toFixed(6)}&n=${encodeURIComponent(name)}`;
 function shareText(title, lat, lon, extra) {
   return `${title}${extra ? ' ' + extra : ''}\n${fmtCoord(lat, lon)}\n\n🗺 Google Maps: https://maps.google.com/?q=${lat.toFixed(6)},${lon.toFixed(6)}\n🧭 Вести в WayBack: ${appLink(lat, lon, title.replace(/^\S+\s/, ''))}`;
 }
@@ -661,6 +666,7 @@ function acceptScanned(text) {
 
 async function shareSend(title, text) {
   try {
+    if (NATIVE) { WayBackNative.share(title, text); return; }
     if (navigator.share) { await navigator.share({ title, text }); return; }
     await navigator.clipboard.writeText(text); toast('Скопійовано — встав у месенджер', 'good');
   } catch (e) { /* скасовано */ }
@@ -1301,6 +1307,7 @@ function closeNav() {
 /* ---------- wake lock ---------- */
 let wakeLock = null;
 async function wake(on) {
+  if (NATIVE) { try { WayBackNative.keepScreen(!!on && !!S.settings.wake); } catch (e) { /* */ } return; }
   try {
     if (on && S.settings.wake && 'wakeLock' in navigator && !wakeLock) {
       wakeLock = await navigator.wakeLock.request('screen');
@@ -1368,6 +1375,11 @@ ${pts}
 </gpx>`;
 }
 function download(name, text, type) {
+  if (NATIVE) {
+    let ok = false; try { ok = WayBackNative.saveFile(name, text, type || ''); } catch (e) { /* */ }
+    toast(ok ? `💾 Збережено: Завантаження/WayBack/${name}` : 'Не вдалося зберегти файл', ok ? 'good' : 'warn');
+    return;
+  }
   const url = URL.createObjectURL(new Blob([text], { type }));
   const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1000);
@@ -1422,7 +1434,7 @@ async function downloadArea() {
   if (!l.dl || list.length > MAX_TILES || !('caches' in window)) return;
   if (!navigator.onLine) { toast('Немає інтернету', 'warn'); return; }
   try { if (navigator.storage && navigator.storage.persist) await navigator.storage.persist(); } catch (e) { /* */ }
-  const cache = await caches.open(TILE_CACHE);
+  const cache = NATIVE ? null : await caches.open(TILE_CACHE);
   dlState.running = true; dlState.cancel = false;
   $('#dlProg').classList.remove('hidden'); $('#dlCancel').classList.remove('hidden'); $('#dlBtn').disabled = true;
   let done = 0, fail = 0, skip = 0, i = 0;
@@ -1432,7 +1444,11 @@ async function downloadArea() {
       const [z, x, y] = list[i++];
       const url = tileUrl(l, z, x, y), key = tileKey(url);
       try {
-        if (await cache.match(key)) skip++;
+        if (NATIVE) {
+          // у додатку плитки зберігає сам Android (їх бачить і Android Auto)
+          const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
+          if (!r.ok) fail++; else if (r.headers.get('X-WB-Cache') === 'hit') skip++;
+        } else if (await cache.match(key)) skip++;
         else {
           const r = await fetch(url, { mode: 'cors', credentials: 'omit' });
           if (r.ok) await cache.put(key, r); else fail++;
@@ -1452,6 +1468,11 @@ async function downloadArea() {
   updateCacheSize();
 }
 async function updateCacheSize() {
+  if (NATIVE) {
+    try { $('#cacheSize').textContent = (+WayBackNative.tileBytes() / 1048576).toFixed(1) + ' МБ'; }
+    catch (e) { $('#cacheSize').textContent = '—'; }
+    return;
+  }
   try {
     const e = await navigator.storage.estimate();
     $('#cacheSize').textContent = (e.usage / 1048576).toFixed(1) + ' МБ';
@@ -1461,6 +1482,7 @@ $('#dlBtn').onclick = downloadArea;
 $('#dlCancel').onclick = () => { dlState.cancel = true; };
 $('#clearTiles').onclick = async () => {
   if (!(await confirmBox('Очистити кеш карт?', 'Офлайн-карти доведеться завантажити знову. Точки й треки не постраждають.', 'Очистити'))) return;
+  if (NATIVE) { try { WayBackNative.clearTiles(); } catch (e) { /* */ } }
   await caches.delete(TILE_CACHE); updateCacheSize(); toast('Кеш карт очищено');
 };
 
@@ -1614,6 +1636,7 @@ async function checkUpdate() {
   const sub = { set textContent(t) { updStatus(t); } };
   if (!navigator.onLine) { sub.textContent = `Версія ${APP_VERSION} · немає інтернету`; toast('Немає інтернету — оновлення потребує звʼязку', 'warn'); done(); return; }
   sub.textContent = 'Перевіряю…';
+  if (NATIVE) { await checkApkUpdate(sub); done(); return; }
   let remote = null;
   try {
     const r = await fetch('app.js?t=' + Date.now(), { cache: 'no-store' });
@@ -1843,6 +1866,94 @@ $('#fabFit').onclick = () => {
   if (ll.length === 1) map.setView(ll[0], 16); else map.fitBounds(L.latLngBounds(ll).pad(0.15), { maxZoom: 17 });
 };
 
+/* ---------- Android-додаток і Android Auto ---------- */
+/* У додатку WayBack для Android сторінка працює всередині WebView, а поруч є
+   window.WayBackNative. Через нього машина бачить точки й шар карти, а телефон
+   отримує треки, записані в машині, і місце паркування. У браузері цього обʼєкта
+   немає, і все працює як раніше. */
+function nativeSyncSoon(k) {
+  if (!NATIVE || !/^(points|target|settings|track)$/.test(k)) return;
+  clearTimeout(nativeTimer);
+  nativeTimer = setTimeout(nativeSync, 1200);
+}
+function nativeSync() {
+  if (!NATIVE) return;
+  try {
+    WayBackNative.sync(JSON.stringify({
+      layer: S.settings.layer,
+      target: S.targetId,
+      points: S.points.map((p) => ({ id: p.id, name: p.name, icon: p.icon, lat: p.lat, lon: p.lon })),
+      track: S.track ? S.track.pts.slice(-3000).map((p) => [p[0], p[1]]) : [],
+    }));
+  } catch (e) { /* */ }
+}
+/** Забрати з Android те, що записала машина: треки поїздок і місце паркування. */
+function wbNativePull() {
+  if (!NATIVE) return;
+  let d;
+  try { d = JSON.parse(WayBackNative.pending() || '{}'); } catch (e) { return; }
+  const ack = { trips: [], parking: 0 };
+  let added = 0;
+  (d.trips || []).forEach((t) => {
+    ack.trips.push(t.start);
+    const id = 'car' + t.start;
+    if (!t.pts || t.pts.length < 2 || S.tracks.some((x) => x.id === id)) return;
+    let dd = 0;
+    for (let i = 1; i < t.pts.length; i++) dd += dist(t.pts[i - 1], t.pts[i]);
+    S.tracks.unshift({ id, start: t.start, end: t.end || t.pts[t.pts.length - 1][2], pts: t.pts, dist: dd, target: '🚗 поїздка' });
+    added++;
+  });
+  if (added) {
+    S.tracks.sort((a, b) => b.start - a.start);
+    trimTracks();
+    LS.set('tracks', S.tracks);
+    if (!$('#histSheet').classList.contains('hidden')) renderTrackList();
+    toast(`🚗 Треків з машини: ${added} — вони в історії`, 'good');
+  }
+  const pk = d.parking;
+  if (pk && Number.isFinite(pk.lat) && Number.isFinite(pk.lon)) {
+    ack.parking = pk.t;
+    // одна «автоматична» точка машини, яку щоразу пересуваємо, а не плодимо нові
+    let p = S.points.find((x) => x.auto === 'car');
+    if (p) {
+      p.lat = +pk.lat.toFixed(6); p.lon = +pk.lon.toFixed(6); p.t = pk.t;
+      S.targetId = p.id; S.arrived = false;
+      savePoints(); renderPoints(); renderPointList(); updateAll();
+    } else {
+      p = addPoint({ name: 'Машина', icon: '🚗', lat: pk.lat, lon: pk.lon }, true);
+      p.auto = 'car'; savePoints();
+    }
+    toast('🚗 Місце машини збережено — вона тепер ціль', 'good');
+  }
+  if (ack.trips.length || ack.parking) { try { WayBackNative.ack(JSON.stringify(ack)); } catch (e) { /* */ } }
+}
+window.wbNativePull = wbNativePull;
+/** Кнопка «Назад» на Android: закрити відкриту панель. false — закривати нічого. */
+window.wbBack = () => {
+  for (const sel of ['#histSheet', '#sheet']) {
+    const el = $(sel);
+    if (el && !el.classList.contains('hidden')) { el.classList.add('hidden'); return true; }
+  }
+  if (S.navOpen) { closeNav(); return true; }
+  return false;
+};
+/** У додатку оновлення приходить новим APK — лише перевіряємо, чи є новіша версія. */
+async function checkApkUpdate(sub) {
+  let remote = null;
+  try {
+    const r = await fetch(RAW_APP_JS + '?t=' + Date.now(), { cache: 'no-store' });
+    const m = (await r.text()).match(/APP_VERSION\s*=\s*'([^']+)'/);
+    remote = m && m[1];
+  } catch (e) { /* немає звʼязку */ }
+  if (!remote) { sub.textContent = `Версія ${APP_VERSION} · не вдалося перевірити`; toast('Не вдалося перевірити оновлення', 'warn'); return; }
+  const a = remote.split('.').map(Number), b = APP_VERSION.split('.').map(Number);
+  let cmp = 0;
+  for (let i = 0; i < Math.max(a.length, b.length) && !cmp; i++) cmp = (a[i] || 0) - (b[i] || 0);
+  if (cmp <= 0) { sub.textContent = `Версія ${APP_VERSION} — остання ✓`; toast('У тебе остання версія ✓', 'good'); return; }
+  sub.textContent = `Є версія ${remote} — встанови новий APK з GitHub (Actions)`;
+  toast(`⬇️ Є версія ${remote}: завантаж новий APK на GitHub`, 'good');
+}
+
 /* ---------- init ---------- */
 renderPoints();
 if (S.track) {
@@ -1855,11 +1966,12 @@ updateAll();
 setFollow(true);
 handleIncomingLink();
 startGps();
+nativeSync();
 if (!needsCompassPermission()) bindCompass();
 
 window.addEventListener('online', () => toast('🌐 Інтернет є'));
 window.addEventListener('offline', () => toast('📴 Офлайн — працюю з кешованою картою', 'warn'));
 
-if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+if ('serviceWorker' in navigator && location.protocol !== 'file:' && !NATIVE) {
   window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
 }
