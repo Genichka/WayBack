@@ -17,16 +17,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Android-проєкт лежить в архіві android-src.zip (так зручніше завантажувати з телефона)
+      # Android-проєкт — тека android/. Якщо колись завантажиш його архівом android-src.zip
+      # (зручно з телефона), він розпакується поверх.
       - name: Unpack Android project
         run: |
           if [ -f android-src.zip ]; then unzip -o -q android-src.zip; fi
           test -f android/app/build.gradle.kts
 
-            - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
+
+      # Android SDK на ubuntu-latest уже встановлений (ANDROID_HOME), окремий крок не потрібен
 
       - uses: gradle/actions/setup-gradle@v5
         with:
@@ -55,4 +58,3 @@ jobs:
           body: Свіжа збірка для Android і Android Auto. Встанови APK поверх старого — дані збережуться.
           files: WayBack.apk
           make_latest: true
-
