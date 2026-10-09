@@ -24,12 +24,12 @@ jobs:
           if [ -f android-src.zip ]; then unzip -o -q android-src.zip; fi
           test -f android/app/build.gradle.kts
 
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - uses: android-actions/setup-android@v3
+      # Android SDK на ubuntu-latest уже встановлений (ANDROID_HOME), окремий крок не потрібен
 
       - uses: gradle/actions/setup-gradle@v4
         with:
