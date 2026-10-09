@@ -17,7 +17,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Android-проєкт лежить в архіві android-src.zip (так зручніше завантажувати з телефона)
+      # Android-проєкт — тека android/. Якщо колись завантажиш його архівом android-src.zip
+      # (зручно з телефона), він розпакується поверх.
       - name: Unpack Android project
         run: |
           if [ -f android-src.zip ]; then unzip -o -q android-src.zip; fi

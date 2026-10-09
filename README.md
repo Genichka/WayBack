@@ -27,7 +27,7 @@ HTTPS обовʼязковий — без нього не працюють GPS, 
 
 ## Android-додаток і Android Auto
 У репозиторії є Android-версія: той самий WayBack, плюс екран для машини (Android Auto).
-- Проєкт лежить в `android-src.zip`, збирає його GitHub Actions (`.github/workflows/android.yml`).
+- Проєкт лежить у теці `android/`, збирає його GitHub Actions (`.github/workflows/android.yml`).
 - Готовий APK: вкладка **Releases → WayBack APK** (або Actions → останній запуск → Artifacts).
 - У машині: офлайн-карта (ті самі завантажені райони), трек поїздки пишеться сам, точки з телефона,
   кнопки «Запис/Стоп», «Паркінг», «Шар», масштаб і центрування.
