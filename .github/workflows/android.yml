@@ -1,1 +1,60 @@
+# Збирає APK WayBack (телефон + Android Auto) при кожному оновленні файлів у main.
+# Готовий файл: вкладка Actions → останній запуск → Artifacts → WayBack-apk,
+# а також сторінка Releases (тег apk-latest) — звідти зручно качати з телефона.
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Android-проєкт лежить в архіві android-src.zip (так зручніше завантажувати з телефона)
+      - name: Unpack Android project
+        run: |
+          if [ -f android-src.zip ]; then unzip -o -q android-src.zip; fi
+          test -f android/app/build.gradle.kts
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v3
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.7'
+
+      - name: Build APK
+        working-directory: android
+        run: gradle assembleDebug --stacktrace
+
+      - name: Rename APK
+        run: |
+          VER=$(grep -oP "APP_VERSION\s*=\s*'\K[^']+" app.js)
+          cp android/app/build/outputs/apk/debug/app-debug.apk WayBack.apk
+          echo "VER=$VER" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: WayBack-apk
+          path: WayBack.apk
+
+      - name: Publish to Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: WayBack APK ${{ env.VER }} (збірка ${{ github.run_number }})
+          body: Свіжа збірка для Android і Android Auto. Встанови APK поверх старого — дані збережуться.
+          files: WayBack.apk
+          make_latest: true
 
