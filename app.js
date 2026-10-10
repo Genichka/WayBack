@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.20.0';
+const APP_VERSION = '1.21.0';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -349,6 +349,7 @@ function onPos(p) {
   if (S.pendingStart && a <= 50) { S.pendingStart = false; startTrack(); }
   autoRecord();
   recordPoint();
+  stillCheck();
   updateAll();
 }
 let gpsWatch = null, gpsHelpShown = false;
@@ -418,6 +419,36 @@ async function enableCompass() {
 const needsCompassPermission = () => typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function';
 
 /* ---------- track ---------- */
+/* Повороти. Звичайний крок (8/5/4 м пішки, 10 м в авто) на повороті зрізав би кут.
+   Тож щойно напрям змінився на 10°+, пишемо густо: спершу кожен метр, далі
+   поступово рідше - до 4 м, а потім знову звичайний крок. Новий поворот посеред
+   цього починає густий запис заново. (В авто GPS дає точку раз на секунду,
+   тож там «кожен метр» = кожна точка, яку дає телефон.) */
+const TURN_STEPS = [1, 1, 2, 2, 3, 3, 4, 4];
+const TURN_DEG = 10;
+/** Напрям останньої ділянки сліду завдовжки щонайменше back метрів. */
+function recentDir(pts, back) {
+  const last = pts[pts.length - 1];
+  for (let i = pts.length - 2; i >= 0; i--) if (dist(pts[i], last) >= back) return bearing(pts[i], last);
+  return null;
+}
+/** Чи почався поворот. GPS тремтить, тож поворот, порахований по координатах,
+ *  має підтвердитись двічі поспіль - інакше на прямій тремтіння давало б «повороти».
+ *  Курс, який дає сам GPS у русі (машина, швидка хода), точніший - йому віримо одразу. */
+function isTurn(tr, last, cur, d, p) {
+  if (p.acc > 20) { tr.turnPend = 0; return false; }   // при поганому сигналі «поворот» - це шум
+  const before = recentDir(tr.pts, 6);
+  if (before == null) return false;
+  const course = p.speed > 1 && p.heading != null && !isNaN(p.heading);
+  const now = course ? p.heading : (d >= Math.max(2.5, p.acc * 0.5) ? bearing(last, cur) : null);
+  if (now == null) return false;
+  if (Math.abs(angDiff(now, before)) < TURN_DEG) { tr.turnPend = 0; return false; }
+  if (course && p.speed > 3) return true;
+  tr.turnPend = (tr.turnPend || 0) + 1;
+  if (tr.turnPend < 2) return false;
+  tr.turnPend = 0;
+  return true;
+}
 function recordPoint() {
   const tr = S.track, p = S.pos;
   if (!tr || !p || p.acc > PROF().maxAcc) return;
@@ -425,24 +456,24 @@ function recordPoint() {
   const last = tr.pts[tr.pts.length - 1];
   if (last) {
     const d = dist(last, cur), dt = (cur[2] - last[2]) / 1000;
-    // Крок за відстанню. Але на повороті чекати повний крок не можна: тоді слід
-    // зрізає кут прямою через двори. Тож якщо напрям змінився на 20°+, пишемо раніше.
-    if (d < Math.max(PROF().minStep, TRAV().minStep, p.acc * 0.4)) {
-      const prev = tr.pts[tr.pts.length - 2];
-      const turn = prev && d >= Math.max(4, p.acc * 0.5) && dist(prev, last) >= 3
-        && Math.abs(angDiff(bearing(last, cur), bearing(prev, last))) >= 20;
-      if (!turn) return;
-    }
+    const inTurn = tr.turnI != null && tr.turnI < TURN_STEPS.length;
+    const step = inTurn ? TURN_STEPS[tr.turnI] : Math.max(PROF().minStep, TRAV().minStep, p.acc * 0.4);
+    const turn = d >= 1 && isTurn(tr, last, cur, d, p);
+    if (d < step && !turn) return;
     // Стрибок GPS - це НЕМОЖЛИВА швидкість, а не просто швидка.
     // Межа 55 м/с ≈ 198 км/год: машина, потяг і велосипед проходять,
     // а телепорт на сотні метрів за секунду - ні.
-    // (Раніше тут стояло 15 м/с = 54 км/год, і в авто справжній рух
-    //  вважався стрибком — слід виходив рваними прямими через квартали.)
     if (dt > 0 && d / dt > 55 && (S.jumps = (S.jumps || 0) + 1) < 3) return;
     S.jumps = 0;
     tr.dist += d;
+    if (turn) tr.turnI = 0;                           // поворот - далі кожен метр
+    else if (inTurn) tr.turnI++;                      // крок за кроком рідше: 1, 1, 2, 2, 3, 3, 4, 4 м
+    tr.pts.push(cur);
+    trackLine.addLatLng([cur[0], cur[1]]); trackCase.addLatLng([cur[0], cur[1]]);
+    saveTrack();
+    return;
   }
-  tr.pts.push(cur);
+  tr.pts.push(cur);                                   // перша точка запису
   trackLine.addLatLng([cur[0], cur[1]]); trackCase.addLatLng([cur[0], cur[1]]);
   saveTrack();
 }
@@ -457,6 +488,7 @@ function startTrack(silent) {
     toast(`🚗 Точку «${pt.name}» позначено`, 'good');
   }
   if (!silent) S.autoOff = false;
+  S.stillAt = null;
   S.track = { id: 't' + Date.now(), start: Date.now(), pts: [], dist: 0, target: target() ? target().name : null,
               travel: S.settings.travel, profile: S.settings.profile };
   trackLine.setLatLngs([]); trackCase.setLatLngs([]);
@@ -475,10 +507,15 @@ function autoRecord() {
 }
 async function stopTrack() {
   const ok = await confirmBox('Завершити запис?', `Пройдено ${fmtDist(S.track.dist)} за ${fmtDur(Date.now() - S.track.start)}. Трек збережеться в історії.`, 'Завершити');
-  if (!ok) return;
+  if (!ok || !S.track) return;              // поки питали, запис міг зупинитись сам
+  finishTrack(Date.now(), false);
+}
+/** Зберегти активний запис в архів. end - коли рух насправді скінчився. */
+function finishTrack(end, auto) {
   S.autoOff = true;                         // більше не починати самому
-  const tr = S.track; tr.end = Date.now();
-  if (S.pos) {   // останній крок - до самої точки зупинки
+  const tr = S.track; tr.end = end;
+  if (auto) tr.autoStop = true;
+  if (S.pos && !auto) {   // останній крок - до самої точки зупинки
     const last = tr.pts[tr.pts.length - 1], cur = [+S.pos.lat.toFixed(6), +S.pos.lon.toFixed(6), Date.now(), Math.round(S.pos.acc), null];
     if (last && dist(last, cur) >= 3 && S.pos.acc <= PROF().maxAcc) { tr.dist += dist(last, cur); tr.pts.push(cur); }
   }
@@ -494,9 +531,35 @@ async function stopTrack() {
   if (!S.navOpen) wake(false);
   updateTrackBtn(); updateAll();
   updAskLater();
-  toast(S.settings.autorec ? 'Запис зупинено. Слід більше не пишеться — натисни «Старт»'
-                           : 'Трек збережено', 'good');
+  if (auto) {
+    vibrate([300, 150, 300]);
+    toast(tr.pts.length > 1
+      ? `⏹ Ти стоїш понад 10 хв — запис зупинено й збережено в архів: ${fmtDist(tr.dist)} за ${fmtDur(tr.end - tr.start)}`
+      : '⏹ Ти стоїш понад 10 хв — запис зупинено (руху не було, зберігати нічого)', 'good');
+  } else toast(S.settings.autorec ? 'Запис зупинено. Слід більше не пишеться — натисни «Старт»'
+                                  : 'Трек збережено', 'good');
 }
+
+/* ---------- автозупинка ----------
+   Стоїш на місці (у межах 25 м, або більше, якщо GPS неточний) понад 10 хвилин -
+   запис зупиняється сам і йде в архів. Кінцем маршруту вважається мить, коли ти
+   зупинився, тож ці 10 хвилин до часу маршруту не додаються. */
+const STILL_MS = 10 * 60 * 1000, STILL_R = 25;
+function stillCheck() {
+  if (!S.track || !S.pos) { S.stillAt = null; return; }
+  const now = Date.now(), here = [S.pos.lat, S.pos.lon];
+  if (now - S.pos.t > 90 * 1000) return;              // позиція застаріла (екран спав) - чекаємо свіжу
+  if (!S.stillAt || dist(S.stillAt, here) > Math.max(STILL_R, (S.pos.acc || 0) * 1.5)) {
+    S.stillAt = here; S.stillSince = now; return;
+  }
+  if (now - S.stillSince >= STILL_MS) {
+    const end = Math.max(S.track.start, S.stillSince);
+    S.stillAt = null;
+    if (!$('#modal').classList.contains('hidden') && $('#mTitle').textContent === 'Завершити запис?') $('#mCancel').click();
+    finishTrack(end, true);
+  }
+}
+setInterval(stillCheck, 30 * 1000);
 function updateTrackBtn() {
   const b = $('#trackBtn'), on = !!S.track;
   b.classList.toggle('stop', on); b.classList.toggle('primary', !on);
@@ -1549,6 +1612,56 @@ document.addEventListener('visibilitychange', () => {
 });
 window.addEventListener('pagehide', () => { if (S.track) saveTrack(true); });
 
+/* ---------- характеристики маршруту ---------- */
+const fmtSpeed = (ms) => ms == null || !isFinite(ms) ? '—' : (ms * 3.6).toFixed(ms * 3.6 < 10 ? 1 : 0) + ' км/год';
+const fmtTime = (t) => new Date(t).toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' });
+function trackStats(tr) {
+  const pts = tr.pts || [];
+  const end = tr.end || (pts.length ? pts[pts.length - 1][2] : tr.start);
+  const dur = Math.max(0, end - tr.start);
+  let moving = 0, maxSp = 0, up = 0, down = 0, far = 0, ref = null;
+  const start = pts[0];
+  for (let i = 1; i < pts.length; i++) {
+    const d = dist(pts[i - 1], pts[i]), dt = (pts[i][2] - pts[i - 1][2]) / 1000;
+    if (dt > 0 && d / dt >= 0.3) moving += Math.min(dt, d / 0.3);   // довга пауза між точками - то стоянка, а не повільний рух
+    if (start) far = Math.max(far, dist(start, pts[i]));
+  }
+  // максимальна швидкість - по відрізку щонайменше 10 с, щоб стрибок GPS не дав «200 км/год»
+  for (let i = 1, j = 0, acc = 0; i < pts.length; i++) {
+    acc += dist(pts[i - 1], pts[i]);
+    while (j < i - 1 && (pts[i][2] - pts[j + 1][2]) >= 10000) { acc -= dist(pts[j], pts[j + 1]); j++; }
+    const dt = (pts[i][2] - pts[j][2]) / 1000;
+    if (dt >= 10) { const sp = acc / dt; if (sp < 55) maxSp = Math.max(maxSp, sp); }
+  }
+  // набір і спуск висоти з порогом 4 м: дрібні коливання GPS по висоті не рахуємо
+  for (const p of pts) {
+    if (p[4] == null) continue;
+    if (ref == null) { ref = p[4]; continue; }
+    if (p[4] - ref >= 4) { up += p[4] - ref; ref = p[4]; } else if (ref - p[4] >= 4) { down += ref - p[4]; ref = p[4]; }
+  }
+  const hasAlt = pts.some((p) => p[4] != null);
+  return {
+    dur, end, moving: Math.min(moving * 1000, dur), stopped: Math.max(0, dur - moving * 1000),
+    avg: dur > 0 ? tr.dist / (dur / 1000) : null, avgMove: moving > 0 ? tr.dist / moving : null,
+    max: maxSp || null, far, back: start && pts.length > 1 ? dist(start, pts[pts.length - 1]) : null,
+    up: hasAlt ? up : null, down: hasAlt ? down : null, n: pts.length,
+  };
+}
+function trackStatsHtml(tr) {
+  const st = trackStats(tr);
+  const cell = (k, v) => `<div><span>${k}</span><b>${v}</b></div>`;
+  const mode = [(TRAVEL[tr.travel] && `${TRAVEL[tr.travel].ico} ${TRAVEL[tr.travel].name}`), (PROFILES[tr.profile] && `${PROFILES[tr.profile].ico} ${PROFILES[tr.profile].name}`)].filter(Boolean).join(' · ');
+  const notes = [tr.snap ? '🛣️ прикладено до доріг' : '', tr.autoStop ? '⏹ зупинено автоматично (стоянка 10 хв)' : ''].filter(Boolean);
+  return `<div class="trk-stats">
+    ${cell('Початок', `${fmtDate(tr.start)}`)}${cell('Кінець', fmtTime(st.end))}${cell('Тривалість', fmtDur(st.dur))}
+    ${cell('Відстань', fmtDist(tr.dist))}${cell('У русі', fmtDur(st.moving))}${cell('Стоянки', fmtDur(st.stopped))}
+    ${cell('Сер. швидкість', fmtSpeed(st.avg))}${cell('Сер. в русі', fmtSpeed(st.avgMove))}${cell('Макс. швидкість', fmtSpeed(st.max))}
+    ${cell('Найдальше від старту', fmtDist(st.far))}${cell('Кінець від старту', fmtDist(st.back))}${cell('Точок сліду', st.n)}
+    ${st.up != null ? cell('Набір висоти', Math.round(st.up) + ' м') + cell('Спуск', Math.round(st.down) + ' м') : ''}
+    ${mode ? `<div class="wide"><span>Режим</span><b>${mode}</b></div>` : ''}
+  </div>${notes.length ? `<div class="trk-notes">${notes.join(' · ')}</div>` : ''}`;
+}
+
 /* ---------- tracks history ---------- */
 function renderTrackList() {
   const el = $('#trackList');
@@ -1563,20 +1676,26 @@ function renderTrackList() {
     html += `<div class="kv tracks-kv"><span>Історія: ${S.tracks.length} ${S.tracks.length === 1 ? 'трек' : 'тр.'}</span>` +
             `<b class="${pct > 85 ? 'c-orange' : ''}">${kb < 1024 ? kb.toFixed(0) + ' КБ' : (kb / 1024).toFixed(1) + ' МБ'} · ${pct}%</b></div>`;
   }
-  html += S.tracks.map((t) => `<div class="item${t.id === S.shownTrackId ? ' tgt' : ''}" data-id="${t.id}">
-      <span class="i-ico">🥾</span>
-      <div class="i-main" data-a="show"><b>${fmtDate(t.start)}${t.target ? ' · ' + esc(t.target) : ''}</b><small>${fmtDist(t.dist)} · ${fmtDur(t.end - t.start)}</small></div>
+  html += S.tracks.map((t) => {
+    const st = trackStats(t), open = t.id === S.openTrackId;
+    return `<div class="item trk${t.id === S.shownTrackId ? ' tgt' : ''}${open ? ' open' : ''}" data-id="${t.id}">
+      <span class="i-ico">${t.travel === 'car' ? '🚗' : '🥾'}</span>
+      <div class="i-main" data-a="info"><b>${fmtDate(t.start)}${t.target ? ' · ' + esc(t.target) : ''}</b><small>${fmtDist(t.dist)} · ${fmtDur(st.dur)} · ${fmtSpeed(st.avg)} <span class="trk-more">${open ? '▴' : '▾ деталі'}</span></small></div>
       <div class="i-acts">
         <button data-a="show" class="${t.id === S.shownTrackId ? 'on' : ''}" title="Показати">👁️</button>
         <button data-a="gpx" title="GPX">⬇️</button>
         <button data-a="del" title="Видалити">🗑️</button>
-      </div></div>`).join('');
+      </div>${open ? trackStatsHtml(t) : ''}</div>`;
+  }).join('');
   el.innerHTML = html;
 }
 $('#trackList').onclick = async (e) => {
   if (e.target.closest('[data-cur]')) { downloadGpx(S.track); return; }
   const a = e.target.closest('[data-a]'), it = e.target.closest('[data-id]'); if (!a || !it) return;
   const tr = S.tracks.find((x) => x.id === it.dataset.id); if (!tr) return;
+  if (a.dataset.a === 'info') {                  // торкнувся назви - розгорнути характеристики
+    S.openTrackId = S.openTrackId === tr.id ? null : tr.id; renderTrackList(); return;
+  }
   if (a.dataset.a === 'show') {
     if (S.shownTrackId === tr.id) { S.shownTrackId = null; histLine.setLatLngs([]); renderTrackList(); toast('Слід сховано'); return; }
     S.shownTrackId = tr.id; histLine.setLatLngs(tr.snap || tr.pts.map((p) => [p[0], p[1]]));

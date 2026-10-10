@@ -457,3 +457,14 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .map-cmp.off svg { opacity: .45; }
 .map-cmp.off .mc-deg { color: var(--muted); font-weight: 400; }
 .map-cmp:active { transform: scale(.95); }
+
+/* ---------- характеристики маршруту в архіві ---------- */
+.item.trk { flex-wrap: wrap; }
+.item.trk .i-main { cursor: pointer; }
+.trk-more { color: var(--blue); white-space: nowrap; }
+.trk-stats { flex-basis: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.trk-stats div { background: var(--panel2); border-radius: 4px; padding: 5px 7px; min-width: 0; }
+.trk-stats span { display: block; color: var(--muted); font-size: 10.5px; line-height: 1.2; }
+.trk-stats b { display: block; color: var(--strong); font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.trk-notes { flex-basis: 100%; margin-top: 6px; color: var(--muted); font-size: 11.5px; }
+.trk-stats .wide { grid-column: 1 / -1; }
