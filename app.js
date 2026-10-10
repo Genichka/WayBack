@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.19.1';
+const APP_VERSION = '1.19.2';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -267,7 +267,10 @@ let meMarker = null, accCircle = null;
 const CASE = { color: '#0a0d13', opacity: .5, interactive: false, lineCap: 'round', lineJoin: 'round' };
 const trackCase = L.polyline([], Object.assign({}, CASE, { weight: 5 })).addTo(map);
 const trackLine = L.polyline([], { color: '#ffb300', weight: 2.6, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-const histLine  = L.polyline([], { color: '#b388ff', weight: 2.4, opacity: .95, dashArray: '2 7' }).addTo(map);
+// слід з історії - суцільна червона лінія з темною облямівкою, щоб було видно на будь-якій карті
+const histCase  = L.polyline([], Object.assign({}, CASE, { weight: 8 })).addTo(map);
+const histLine  = L.polyline([], { color: '#ff2a2a', weight: 4.5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+{ const set = histLine.setLatLngs.bind(histLine); histLine.setLatLngs = (ll) => { histCase.setLatLngs(ll); return set(ll); }; }
 const routeCase = L.polyline([], Object.assign({}, CASE, { weight: 6 })).addTo(map);
 const routeLine = L.polyline([], { color: '#00d4ff', weight: 3.2, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(map);
 const guideCase = L.polyline([], Object.assign({}, CASE, { weight: 5 })).addTo(map);
@@ -1352,11 +1355,11 @@ $('#trackList').onclick = async (e) => {
   const a = e.target.closest('[data-a]'), it = e.target.closest('[data-id]'); if (!a || !it) return;
   const tr = S.tracks.find((x) => x.id === it.dataset.id); if (!tr) return;
   if (a.dataset.a === 'show') {
-    if (S.shownTrackId === tr.id) { S.shownTrackId = null; histLine.setLatLngs([]); renderTrackList(); return; }
+    if (S.shownTrackId === tr.id) { S.shownTrackId = null; histLine.setLatLngs([]); renderTrackList(); toast('Слід сховано'); return; }
     S.shownTrackId = tr.id; histLine.setLatLngs(tr.pts.map((p) => [p[0], p[1]]));
     closeHist(); closeSheet(); setFollow(false);   // історія тепер в окремій панелі - її теж закрити, щоб карту було видно
     toast(`👁️ ${fmtDate(tr.start)} · ${fmtDist(tr.dist)} — ще раз 👁️ в історії, щоб сховати`, 'good');
-    setTimeout(() => { try { map.invalidateSize(); map.fitBounds(histLine.getBounds().pad(0.15), { maxZoom: 17 }); } catch (err) { /* */ } }, 50);
+    setTimeout(() => { try { map.invalidateSize(); map.fitBounds(histLine.getBounds().pad(0.25), { maxZoom: 17 }); } catch (err) { /* */ } }, 50);
   } else if (a.dataset.a === 'gpx') downloadGpx(tr);
   else if (a.dataset.a === 'del') {
     if (!(await confirmBox('Видалити трек?', `${fmtDate(tr.start)} · ${fmtDist(tr.dist)}`, 'Видалити'))) return;
