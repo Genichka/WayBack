@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.21.2';
+const APP_VERSION = '1.22.0';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -318,8 +318,7 @@ const target = () => S.points.find((p) => p.id === S.targetId) || null;
 /* ---------- GPS ---------- */
 function gpsBadge(state, text) {
   S.gpsState = state;                       // колір підхопить панель «GPS ±»
-  const b = $('#gpsBadge');
-  if (b) { b.className = 'gps ' + state; b.querySelector('span').textContent = text; }
+  S.gpsText = text;
 }
 /* Згладжування GPS (фільтр Калмана). Телефон дає точку з похибкою 3-10 м, і вона
    «гуляє» навіть коли стоїш. Фільтр зважує нову точку за її точністю: точна
@@ -401,7 +400,7 @@ async function gpsHelp() {
   });
   if (again) { startGps(); navigator.geolocation.getCurrentPosition(onPos, onPosErr, { enableHighAccuracy: true, timeout: 20000 }); }
 }
-{ const g = $('#pAcc') || $('#vAcc'); if (g) g.onclick = () => (S.gpsDenied || !S.pos ? gpsHelp() : null); }
+{ const g = $('#vAcc'); if (g) g.onclick = () => (S.gpsDenied || !S.pos ? gpsHelp() : null); }
 
 /* ---------- compass ---------- */
 let compassBound = false;
@@ -526,6 +525,16 @@ async function stopTrack() {
   if (!ok || !S.track) return;              // поки питали, запис міг зупинитись сам
   finishTrack(Date.now(), false);
 }
+/** Покласти готовий трек в архів (одне місце для «Стоп», автозупинки й «Очистити»). */
+function archiveTrack(tr) {
+  if (!tr || !tr.pts || tr.pts.length < 2) return false;
+  S.tracks.unshift(tr);
+  const dropped = trimTracks();
+  LS.set('tracks', S.tracks);
+  if (dropped) toast(`Історію підчищено: найстаріших треків прибрано ${dropped}`, 'warn');
+  setTimeout(() => snapAndStore(tr), 1500);
+  return true;
+}
 /** Зберегти активний запис в архів. end - коли рух насправді скінчився. */
 function finishTrack(end, auto) {
   S.autoOff = true;                         // більше не починати самому
@@ -535,13 +544,8 @@ function finishTrack(end, auto) {
     const last = tr.pts[tr.pts.length - 1], cur = [+S.pos.lat.toFixed(6), +S.pos.lon.toFixed(6), Date.now(), Math.round(S.pos.acc), null];
     if (last && dist(last, cur) >= 3 && S.pos.acc <= PROF().maxAcc) { tr.dist += dist(last, cur); tr.pts.push(cur); }
   }
-  if (tr.pts.length > 1) {
-    S.tracks.unshift(tr);
-    setTimeout(() => snapAndStore(tr), 1500);
-    const dropped = trimTracks();
-    LS.set('tracks', S.tracks);
-    if (dropped) toast(`Історію підчищено: найстаріших треків прибрано ${dropped}`, 'warn');
-  }
+  delete tr.turnI; delete tr.turnPend;
+  archiveTrack(tr);
   S.track = null; saveTrack(true);
   trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   if (!S.navOpen) wake(false);
@@ -1200,10 +1204,10 @@ function straightOk() {
 function applyFallback(msg) {
   const p = buildTrackPath();
   S.rpathLen = null; S.rVia = null; S.rSnap = 0;
-  if (p) { S.rpath = p; S.rsrc = 'track'; S.noLine = false; toast(msg + ' — веду твоїм треком', 'warn'); }
+  if (p) { S.rpath = p; S.rsrc = 'track'; S.noLine = false; if (!S.navOpen) toast(msg + ' — веду твоїм треком', 'warn'); }
   else {
     S.rpath = null; S.rsrc = null; S.noLine = !straightOk();
-    toast(S.noLine ? msg + ' — показую напрям і відстань, без лінії' : msg + ' — веду по прямій', 'warn');
+    if (!S.navOpen) toast(S.noLine ? msg + ' — показую напрям і відстань, без лінії' : msg + ' — веду по прямій', 'warn');
   }
   drawReturn();
 }
@@ -1262,11 +1266,10 @@ function setReturnMode(m, silent) {
   routeCase.setLatLngs([]); routeLine.setLatLngs([]); chevrons.clearLayers();
   if (m === 'track') {
     const p = buildTrackPath();
-    if (p) { S.rpath = p; S.rsrc = 'track'; S.rpathLen = null; if (!silent) toast('👣 Веду твоїм треком', 'good'); }
-    else if (!silent) toast(S.track ? 'Слід ще короткий — поки веду прямою' : 'Немає записаного сліду — поки веду прямою', 'warn');
+    if (p) { S.rpath = p; S.rsrc = 'track'; S.rpathLen = null; }
+    else if (!silent && !S.navOpen) toast(S.track ? 'Слід ще короткий — поки веду прямою' : 'Немає записаного сліду — поки веду прямою', 'warn');
   } else if (m === 'route' && S.navOpen) {
     requestRoute(true);
-    if (!silent) toast('🛣️ Шукаю шлях дорогами…');
   }
   drawReturn(); updateAll();
 }
@@ -1292,8 +1295,7 @@ function refreshReturn() {
 function syncTravSeg() {
   document.querySelectorAll('#travSeg button').forEach((b) =>
     b.classList.toggle('on', b.dataset.t === S.settings.travel));
-  const el = $('#travInfo');
-  if (el) el.textContent = TRAV().info;
+  if ($('#modeChipTxt')) syncModeChip();
 }
 function setTravel(id, silent) {
   if (!TRAVEL[id] || id === S.settings.travel) { syncTravSeg(); return; }
@@ -1315,8 +1317,7 @@ document.addEventListener('click', (e) => {
 function syncProfSeg() {
   document.querySelectorAll('#profSeg button').forEach((b) =>
     b.classList.toggle('on', b.dataset.p === S.settings.profile));
-  const el = $('#profInfo');
-  if (el) el.textContent = PROF().info;
+  if ($('#modeChipTxt')) syncModeChip();
 }
 function setProfile(id, silent) {
   if (!PROFILES[id]) return;
@@ -1325,7 +1326,6 @@ function setProfile(id, silent) {
   S.settings.layer = p.layer;
   saveSettings();
   setLayer(p.layer);
-  if (typeof renderMapTab === 'function' && $('#layerSeg')) renderMapTab();
   const want = (S.settings.rmodeBy || {})[id] || p.rmode || 'track';
   if (want !== S.settings.rmode) setReturnMode(want, true);
   syncProfSeg();
@@ -1394,7 +1394,7 @@ function updateTimer() {
   if (S.track) {
     $('#vWalk').textContent = fmtDist(S.track.dist);
     $('#vTime').textContent = fmtDur(Date.now() - S.track.start);
-  } else { $('#vWalk').textContent = '—'; $('#vTime').textContent = '—'; }
+  } else { $('#vWalk').textContent = '—'; $('#vTime').textContent = 'не пишеться'; }
   { const h = $('#vHist'); if (h) h.textContent = S.tracks.length || '—'; }
 }
 setInterval(updateTimer, 1000);
@@ -1465,13 +1465,9 @@ function renderNav() {
   else { dEl.textContent = fmtDist(S.navDist); dEl.classList.remove('arrived'); }
   const hasH = headingFresh();
   const m = S.settings.rmode, rm = RMODE[m];
+  // тут лише напрям; що з маршрутом - пише один рядок під перемикачем режимів
   let sub = `азимут ${Math.round(S.navBearing)}° · ${dirName(S.navBearing)}`;
-  if (m !== 'direct') {
-    if (S.rBusy) sub += ' · шукаю маршрут…';
-    else if (S.rpath) sub += ` · ${rm.name.toLowerCase()}, навпростець ${fmtDist(S.navStraight)}`;
-    else if (S.noLine) sub += ' · дороги не знайшлось, лінії не малюю';
-    else sub += ' · маршрут не побудовано, веду по прямій';
-  }
+  if (m !== 'direct' && S.rpath && S.navStraight != null) sub += ` · навпростець ${fmtDist(S.navStraight)}`;
   $('#navSub').textContent = sub;
   const info = $('#rmodeInfo');
   if (info) {
@@ -1494,7 +1490,7 @@ function renderNav() {
     hint.innerHTML = 'Компас вимкнено.<br><button class="btn primary" id="cmpBtn">Увімкнути компас</button>';
     $('#cmpBtn').onclick = () => enableCompass();
   } else {
-    hint.innerHTML = 'Компас недоступний: стрілка показує напрям відносно <b style="color:var(--red)">N</b> (півночі). Почни йти — напрям візьмемо з GPS.';
+    hint.innerHTML = 'Компаса немає: стрілка — відносно півночі (<b style="color:var(--red)">N</b>). Почни йти — напрям візьме GPS.';
   }
 }
 document.addEventListener('click', (e) => {
@@ -1507,6 +1503,24 @@ function syncModeSeg() {
 }
 syncModeSeg();
 syncProfSeg(); syncTravSeg();
+
+/* Де ти і як рухаєшся міняють раз за прогулянку, тож на головному екрані -
+   один короткий рядок «🏙️ Місто · 🚶 Пішки ▾». Торкнувся - відкриваються перемикачі,
+   обрав - знову згортаються і карта отримує місце назад. */
+function syncModeChip() {
+  const p = PROF(), t = TRAV();
+  $('#modeChipTxt').textContent = `${p.ico} ${p.name} · ${t.ico} ${t.name}`;
+}
+function setModesOpen(open) {
+  $('#quick').classList.toggle('open', open);
+  $('#modeChip').setAttribute('aria-expanded', String(open));
+  setTimeout(() => { try { map.invalidateSize(); } catch (e) { /* */ } }, 50);
+}
+$('#modeChip').onclick = () => setModesOpen(!$('#quick').classList.contains('open'));
+$('#quick').addEventListener('click', (e) => {
+  if (e.target.closest('#profSeg button, #travSeg button')) setTimeout(() => { syncModeChip(); setModesOpen(false); }, 250);
+});
+syncModeChip();
 
 function buildTicks() {
   let s = '';
@@ -1589,13 +1603,30 @@ function navFrame(force) {
   }
 }
 
+/* Картку ведення можна згорнути: лишаються назва, відстань і маленька стрілка,
+   а карта отримує половину екрана назад. Вибір запамʼятовується. */
+function applyNavMin() {
+  const min = !!S.settings.navMin;
+  $('#nav').classList.toggle('min', min);
+  $('#navMin').textContent = min ? '▴' : '▾';
+  $('#navMin').title = min ? 'Розгорнути' : 'Згорнути';
+  requestAnimationFrame(() => {
+    document.body.style.setProperty('--navh', ($('#nav').offsetHeight || 0) + 'px');
+    if (S.navOpen && S.follow) navFrame(true);
+  });
+}
+$('#navMin').onclick = () => { S.settings.navMin = !S.settings.navMin; saveSettings(); applyNavMin(); };
+
 function openNav() {
   if (!target()) { toast('Спочатку познач точку', 'warn'); return; }
   S.navOpen = true; $('#nav').classList.remove('hidden'); $('#navBtn').classList.add('on');
   $('#trkCard').classList.add('hidden');
+  document.body.classList.add('nav-open');
+  requestAnimationFrame(() => document.body.style.setProperty('--navh', ($('#nav').offsetHeight || 0) + 'px'));
   enableCompass(); wake(true);
   const t = target();
   setReturnMode(S.settings.rmode, true);
+  applyNavMin();
   renderNav(); renderCompass();
   // карта веде тебе: у кадрі ти і ціль (картка ведення вже на екрані, її висоту враховуємо)
   if (S.pos) { setFollow(true); requestAnimationFrame(() => navFrame(true)); }
@@ -1603,6 +1634,7 @@ function openNav() {
 }
 function closeNav() {
   S.navOpen = false; $('#nav').classList.add('hidden'); $('#navBtn').classList.remove('on');
+  document.body.classList.remove('nav-open');
   if (S.shownTrackId) $('#trkCard').classList.remove('hidden');
   updAskLater();
   // ведення скінчилось - лінію прибираємо, точка лишається
@@ -1624,9 +1656,23 @@ async function wake(on) {
     } else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
   } catch (e) { /* */ }
 }
+/* Коли екран гасне, браузер присипляє сторінку і GPS не пише. Повернувшись,
+   кажемо про це прямо - щоб пропуск у сліді не був несподіванкою. */
+let hiddenAt = 0;
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') { if (S.track || S.navOpen) wake(true); }
-  else if (S.track) saveTrack(true);
+  if (document.visibilityState === 'visible') {
+    if (S.track || S.navOpen) wake(true);
+    const gap = hiddenAt ? Date.now() - hiddenAt : 0;
+    hiddenAt = 0;
+    if (S.track && gap > 60 * 1000 && !NATIVE) {
+      const last = S.track.pts[S.track.pts.length - 1];
+      const silent = !last || Date.now() - last[2] > 60 * 1000;
+      if (silent) setTimeout(() => toast(`⚠️ Екран був вимкнений ${fmtDur(gap)} — браузер у цей час не писав слід, пропуск буде прямою. На довгу прогулянку тримай WayBack відкритим.`, 'warn'), 600);
+    }
+  } else {
+    hiddenAt = Date.now();
+    if (S.track) saveTrack(true);
+  }
 });
 window.addEventListener('pagehide', () => { if (S.track) saveTrack(true); });
 
@@ -1725,6 +1771,23 @@ $('#tcMore').onclick = () => {
   requestAnimationFrame(fitShownTrack);
 };
 
+/* ---------- кошик ----------
+   Видалений маршрут не зникає одразу: 30 днів він лежить у кошику під архівом,
+   звідки його можна повернути. Старші за 30 днів прибираються самі. */
+const TRASH_DAYS = 30;
+S.trash = LS.get('trash', []).filter((t) => Date.now() - (t.deletedAt || 0) < TRASH_DAYS * 864e5);
+LS.set('trash', S.trash);
+function trashHtml() {
+  if (!S.trash.length) return '';
+  const left = (t) => Math.max(1, Math.ceil((t.deletedAt + TRASH_DAYS * 864e5 - Date.now()) / 864e5));
+  let h = `<button class="trash-head" data-trash-toggle>🗑️ Кошик · ${S.trash.length} <span>${S.trashOpen ? '▴' : '▾'}</span></button>`;
+  if (S.trashOpen) h += S.trash.map((t) => `<div class="item trash-item" data-tid="${t.id}">
+      <span class="i-ico">🗑️</span>
+      <div class="i-main"><b>${fmtDate(t.start)}${t.target ? ' · ' + esc(t.target) : ''}</b><small>${fmtDist(t.dist)} · зникне через ${left(t)} дн.</small></div>
+      <div class="i-acts"><button data-t="restore" title="Повернути">♻️</button><button data-t="purge" title="Стерти назавжди">✖️</button></div></div>`).join('');
+  return h;
+}
+
 /* ---------- tracks history ---------- */
 function renderTrackList() {
   const el = $('#trackList');
@@ -1733,7 +1796,7 @@ function renderTrackList() {
     html += `<div class="item tgt"><span class="i-ico">🔴</span><div class="i-main"><b>Поточний запис</b><small>${fmtDist(S.track.dist)} · ${fmtDur(Date.now() - S.track.start)} · ${S.track.pts.length} т.</small></div>
       <div class="i-acts"><button data-cur="gpx" title="GPX">⬇️</button></div></div>`;
   }
-  if (!S.tracks.length && !S.track) { el.innerHTML = '<div class="empty">Збережених треків ще немає</div>'; return; }
+  if (!S.tracks.length && !S.track) { el.innerHTML = '<div class="empty">Збережених треків ще немає</div>' + trashHtml(); return; }
   if (S.tracks.length) {
     const kb = tracksBytes() / 1024, pct = Math.round(tracksBytes() / TRACKS_BUDGET * 100);
     html += `<div class="kv tracks-kv"><span>Історія: ${S.tracks.length} ${S.tracks.length === 1 ? 'трек' : 'тр.'}</span>` +
@@ -1750,18 +1813,36 @@ function renderTrackList() {
         <button data-a="del" title="Видалити">🗑️</button>
       </div></div>`;
   }).join('');
-  el.innerHTML = html;
+  el.innerHTML = html + trashHtml();
 }
 $('#trackList').onclick = async (e) => {
   if (e.target.closest('[data-cur]')) { downloadGpx(S.track); return; }
+  if (e.target.closest('[data-trash-toggle]')) { S.trashOpen = !S.trashOpen; renderTrackList(); return; }
+  const tb = e.target.closest('[data-t]');
+  if (tb) {
+    const tr = S.trash.find((x) => x.id === tb.closest('[data-tid]').dataset.tid); if (!tr) return;
+    if (tb.dataset.t === 'restore') {
+      S.trash = S.trash.filter((x) => x.id !== tr.id); LS.set('trash', S.trash);
+      const back = Object.assign({}, tr); delete back.deletedAt;
+      if (!S.tracks.some((x) => x.id === back.id)) { S.tracks.push(back); S.tracks.sort((a, b) => b.start - a.start); trimTracks(); LS.set('tracks', S.tracks); }
+      toast('♻️ Маршрут повернуто в архів', 'good');
+    } else if (tb.dataset.t === 'purge') {
+      if (!(await confirmBox('Стерти назавжди?', `${fmtDate(tr.start)} · ${fmtDist(tr.dist)}. Повернути вже не вийде.`, 'Стерти'))) return;
+      S.trash = S.trash.filter((x) => x.id !== tr.id); LS.set('trash', S.trash);
+    }
+    renderTrackList(); return;
+  }
   const a = e.target.closest('[data-a]'), it = e.target.closest('[data-id]'); if (!a || !it) return;
   const tr = S.tracks.find((x) => x.id === it.dataset.id); if (!tr) return;
   if (a.dataset.a === 'show' && S.shownTrackId === tr.id) { hideTrack(); renderTrackList(); toast('Слід сховано'); return; }
   if (a.dataset.a === 'show' || a.dataset.a === 'open') showTrack(tr);
   else if (a.dataset.a === 'gpx') downloadGpx(tr);
   else if (a.dataset.a === 'del') {
-    if (!(await confirmBox('Видалити трек?', `${fmtDate(tr.start)} · ${fmtDist(tr.dist)}`, 'Видалити'))) return;
+    if (!(await confirmBox('Видалити трек?', `${fmtDate(tr.start)} · ${fmtDist(tr.dist)}. Він полежить у кошику ${TRASH_DAYS} днів — звідти можна повернути.`, 'Видалити'))) return;
     S.tracks = S.tracks.filter((x) => x.id !== tr.id); LS.set('tracks', S.tracks);
+    S.trash.unshift(Object.assign({}, tr, { deletedAt: Date.now() }));
+    if (S.trash.length > 20) S.trash.length = 20;
+    LS.set('trash', S.trash);
     if (S.shownTrackId === tr.id) hideTrack();
     renderTrackList();
   }
@@ -1897,7 +1978,6 @@ function seg(el, items, cur, onPick) {
   el.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; el.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); onPick(b.dataset.v); };
 }
 function renderMapTab() {
-  seg($('#layerSeg'), Object.entries(LAYERS).map(([k, l]) => [k, l.name]), S.settings.layer, (v) => { setLayer(v); updateDlInfo(); });
   seg($('#radiusSeg'), [[1, '1 км'], [3, '3 км'], [10, '10 км']], S.settings.radius, (v) => { S.settings.radius = +v; saveSettings(); updateDlInfo(); });
   seg($('#zoomSeg'), [[16, 'Звичайно'], [17, 'Детально']], S.settings.zmax, (v) => { S.settings.zmax = +v; saveSettings(); updateDlInfo(); });
   updateDlInfo(); updateCacheSize();
@@ -1920,9 +2000,14 @@ async function clearCurrent() {
   if (!hasTrack && !hasPath && !hadTgt) { toast('Нічого очищати'); return; }
   // питаємо лише там, де є що втратити - пройдений слід. Лінію й ціль прибираємо одразу.
   if (hasTrack) {
-    const txt = `Пройдене (${fmtDist(S.track.dist)}) буде стерто без збереження в історію. Запис продовжиться з цього місця.`;
-    if (!(await confirmBox('Очистити поточний слід?', txt, 'Очистити'))) return;
-    S.track.pts = []; S.track.dist = 0; S.track.start = Date.now();   // запис не уриваємо
+    // пройдене не стираємо - воно йде в архів, а на карті слід починається заново
+    const txt = `Пройдене (${fmtDist(S.track.dist)}) збережеться в архів, а слід на карті почнеться з цього місця. Запис триває.`;
+    if (!(await confirmBox('Очистити карту?', txt, 'Очистити'))) return;
+    if (!S.track) return;
+    const done = Object.assign({}, S.track, { id: S.track.id + 'c' + Date.now().toString(36), end: Date.now(), pts: S.track.pts.slice() });
+    delete done.turnI; delete done.turnPend;
+    archiveTrack(done);
+    S.track.pts = []; S.track.dist = 0; S.track.start = Date.now(); S.track.turnI = null;   // запис не уриваємо
     trackLine.setLatLngs([]); trackCase.setLatLngs([]);
     if (S.pos) recordPoint();
     saveTrack(true);
@@ -1936,7 +2021,7 @@ async function clearCurrent() {
     savePoints(); renderPoints(); renderPointList();
   }
   drawReturn(); updateTrackBtn(); updateAll();
-  toast(hadTgt ? 'Очищено · точка лишилась у списку' : 'Очищено', 'good');
+  toast((hasTrack ? 'Пройдене збережено в архів · ' : '') + (hadTgt ? 'точка лишилась у списку' : 'карту очищено'), 'good');
 }
 $('#clearBtn').onclick = clearCurrent;
 
@@ -2010,22 +2095,6 @@ function importGpx(text) {
   toast(`GPX: ${np} точок, ${pts.length > 1 ? 1 : 0} трек`
         + (skipped ? ` · пропущено хибних: ${skipped}` : ''), 'good');
 }
-$('#exitBtn').onclick = async () => {
-  if (S.track) {
-    if (!(await confirmBox('Вийти з додатка?', `Триває запис: ${fmtDist(S.track.dist)}. Трек збережеться в історії.`, 'Зберегти і вийти'))) return;
-    const tr = S.track; tr.end = Date.now();
-    if (tr.pts.length > 1) {
-    S.tracks.unshift(tr);
-    const dropped = trimTracks();
-    LS.set('tracks', S.tracks);
-    if (dropped) toast(`Історію підчищено: найстаріших треків прибрано ${dropped}`, 'warn');
-  }
-    S.track = null; saveTrack(true); trackLine.setLatLngs([]); trackCase.setLatLngs([]); updateTrackBtn();
-  }
-  wake(false); closeSheet();
-  try { window.close(); } catch (e) { /* */ }
-  setTimeout(() => toast('Закрий вікно свайпом або кнопкою «Назад» — дані збережено', 'good'), 400);
-};
 /* ---------- оновлення: як в EnergyUA Junior і WordHunter ----------
    Нова версія ставиться лише з дозволу. Додаток тихо читає version.json поруч із собою:
    {"version": "1.19.1", "changes": ["…", "…"]}. Є новіша - у шапці «🆕 є версія …»,
@@ -2036,7 +2105,7 @@ let UPD = null, updBusy = false, updAsked = '';
 const vNum = (v) => String(v || '').split('.').map((x) => +x || 0);
 function vNewer(a, b) { const x = vNum(a), y = vNum(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; }
 function updStatus(t) {
-  ['#updSub', '#updSub2'].forEach((sel) => { const e = $(sel); if (e) e.textContent = t; });
+  const e = $('#updSub2'); if (e) e.textContent = t;
 }
 function updBadge() {
   const t = $('#verTag');
@@ -2122,7 +2191,6 @@ async function doUpdate() {
   if (from) { LS.set('updFrom', ''); if (from !== APP_VERSION) setTimeout(() => toast(`✅ Оновлено: ${from} → ${APP_VERSION}`, 'good'), 900); }
   if (/[?&]v=/.test(location.search)) try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* */ }
 }
-const _ub = $('#updateBtn'); if (_ub) _ub.onclick = () => checkUpdate(true);
 $('#updBtn').onclick = (e) => { e.stopPropagation(); checkUpdate(true); };
 { const v = $('#updVer'); if (v) v.textContent = `WayBack v${APP_VERSION}`; }
 updBadge();
@@ -2135,8 +2203,8 @@ function syncHelp() {
   const box = $('#helpBox');
   if (!box) return;
   const used = S.points.length || S.tracks.length || S.track;
-  box.open = !used && !LS.get('helpSeen', false);
-  box.ontoggle = () => { if (!box.open) LS.set('helpSeen', true); };
+  box.open = false;                 // для новачка є вікно при першому запуску; тут - довідка на потім
+  void used;
 }
 async function firstRun() {
   if (LS.get('seen', false)) return;

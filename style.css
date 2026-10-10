@@ -57,28 +57,18 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .brand { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; }
 .logo { font-size: 17px; }
 .brand-txt b { display: block; color: var(--strong); font-size: 13px; letter-spacing: .2px; }
-.brand-txt small { display: block; color: var(--muted); font-size: 9.5px; margin-top: -2px; }
+.brand-txt small { display: block; color: var(--muted); font-size: 11px; margin-top: -1px; }
 .icon-btn {
-  width: 30px; height: 30px; border-radius: 7px; border: 1px solid var(--border);
+  width: 40px; height: 40px; border-radius: 7px; border: 1px solid var(--border);
   background: var(--panel2); color: var(--strong); font-size: 15px;
   display: grid; place-items: center; flex: none;
 }
-.icon-btn svg { width: 16px; height: 16px; display: block; }
+.icon-btn svg { width: 19px; height: 19px; display: block; }
 .icon-btn:active { background: var(--border2); transform: scale(.93); }
 .icon-btn:disabled { opacity: .55; }
 .icon-btn.busy svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* очищення - дія руйнівна, тож підсвічуємо теплим */
-#clearBtn { color: var(--orange); }
-#exitBtn:active { background: #ff5a5f33; }
-.gps {
-  display: flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 12px;
-  border: 1px solid var(--border); font-size: 12px; color: var(--muted); white-space: nowrap;
-}
-.gps i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
-.gps.ok i { background: var(--green); box-shadow: 0 0 6px var(--green); }
-.gps.mid i { background: var(--yellow); }
-.gps.bad i { background: var(--red); }
 
 /* швидкі перемикачі під панелями: середовище і спосіб руху.
    Один ряд, щоб не з'їдати карту. */
@@ -95,7 +85,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 @media (max-width: 345px) { .qseg button { font-size: 9.5px; gap: 2px; padding: 5px 1px; } .qseg button span { font-size: 11px; } }
 
 /* stat panels */
-.stats { display: grid; grid-template-columns: 1.3fr 1fr 1fr .8fr .72fr; gap: 4px; padding: 5px; background: var(--bg); }
+.stats { display: grid; grid-template-columns: 1.35fr 1.1fr .85fr .75fr; gap: 4px; padding: 5px; background: var(--bg); }
 /* панель-кнопка: виглядає як сусіди, але натискається */
 .panel.tap { text-align: left; font: inherit; cursor: pointer; }
 .panel.tap:active { background: var(--panel2); transform: scale(.96); }
@@ -104,7 +94,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
   background: var(--panel); border: 1px solid var(--border); border-radius: 4px;
   padding: 4px 6px 5px; min-width: 0;
 }
-.p-title { font-size: 9.5px; color: var(--muted); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.p-title { font-size: 11px; color: var(--muted); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .p-val {
   font-size: 17px; font-weight: 600; color: var(--strong); line-height: 1.15; margin-top: 1px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums;
@@ -132,8 +122,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .fabs { position: absolute; right: 8px; top: 8px; z-index: 500; display: flex; flex-direction: column; gap: 5px; }
 .fab {
-  width: 34px; height: 34px; border-radius: 4px; background: var(--panel); border: 1px solid var(--border2);
-  font-size: 16px; box-shadow: var(--shadow); display: grid; place-items: center; color: var(--text);
+  width: 42px; height: 42px; border-radius: 5px; background: var(--panel); border: 1px solid var(--border2);
+  font-size: 19px; box-shadow: var(--shadow); display: grid; place-items: center; color: var(--text);
 }
 .fab.on { color: var(--blue); border-color: var(--blue); }
 
@@ -234,7 +224,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .dl-info { font-size: 12px; color: var(--text); margin: 8px 0; }
 
 .seg { display: flex; flex-wrap: wrap; border: 1px solid var(--border2); border-radius: 4px; overflow: hidden; }
-.seg button { flex: 1 1 22%; }
 .seg button { flex: 1; background: var(--panel2); border: 0; border-right: 1px solid var(--border); padding: 8px 4px; font-size: 13px; }
 .seg button:last-child { border-right: 0; }
 .seg button.on { background: var(--blue-bg); color: #fff; }
@@ -359,30 +348,12 @@ button { font: inherit; color: inherit; cursor: pointer; }
 }
 
 
-/* ---- профіль середовища ---- */
-.prof { margin: 2px 0 10px; }
-.prof-lbl { font-size: 12px; color: var(--dim); margin-bottom: 5px; }
-.seg.prof-seg button {
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  padding: 10px 4px; font-size: 13.5px; color: var(--text); font-weight: 500;
-}
-.seg.prof-seg button span { font-size: 15px; line-height: 1; }
-.seg.prof-seg button.on { background: var(--blue-bg); color: #fff; font-weight: 600; }
-.prof-info { margin-top: 6px; font-size: 12px; color: var(--dim); line-height: 1.45; }
 
 .tracks-kv { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 8px 10px; font-size: 12.5px; color: var(--dim); }
 
 
 /* ---- версія і оновлення ---- */
 #verTag { opacity: .75; }
-.upd-row {
-  display: flex; align-items: center; gap: 10px; margin: 2px 0 12px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 4px; padding: 9px 11px;
-}
-.upd-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.upd-txt b { font-size: 13.5px; color: var(--strong); }
-.upd-txt small { font-size: 11.5px; color: var(--dim); }
-.upd-row .btn { flex: 0 0 auto; padding: 8px 12px; font-size: 13px; }
 
 
 /* ---- підказка «Як це працює» ---- */
@@ -461,7 +432,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* ---------- характеристики маршруту в архіві ---------- */
 .item.trk { flex-wrap: wrap; }
 .item.trk .i-main { cursor: pointer; }
-.trk-more { color: var(--blue); white-space: nowrap; }
 .trk-stats { flex-basis: 100%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .trk-stats div { background: var(--panel2); border-radius: 4px; padding: 5px 7px; min-width: 0; }
 .trk-stats span { display: block; color: var(--muted); font-size: 10.5px; line-height: 1.2; }
@@ -488,3 +458,37 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 /* слід з архіву на світлій карті: написи на плитках видно крізь червону лінію */
 .leaflet-pane.blend { mix-blend-mode: multiply; }
+
+/* під час ведення спливаючі повідомлення - над карткою, а не поверх неї */
+body.nav-open .toast { bottom: calc(var(--navh, 300px) + 70px + env(safe-area-inset-bottom)); }
+/* під час ведення є великий компас у картці - малий на карті ховаємо */
+body.nav-open .map-cmp { display: none; }
+
+/* ---------- компактний рядок режимів ---------- */
+.quick { flex-wrap: wrap; }
+.quick .qseg { display: none; }
+.quick.open .qseg { display: flex; }
+.quick.open .mode-chip i { transform: rotate(180deg); }
+.mode-chip {
+  flex: 1 1 100%; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 4px; color: var(--strong);
+  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+}
+.mode-chip i { font-style: normal; color: var(--muted); transition: transform .2s; }
+.quick.open .mode-chip { margin-bottom: 0; }
+.p-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+
+/* ---------- розміри для пальця й читабельність надворі ---------- */
+.rec-badge { font-size: 11px; padding: 4px 8px; }
+.pin-label { font-size: 11.5px !important; }
+.map-cmp .mc-deg { font-size: 10.5px; }
+.nav-btns { display: flex; gap: 6px; }
+/* згорнута картка ведення: назва, відстань і маленька стрілка */
+.nav.min .rmode, .nav.min .rmode-info, .nav.min .nav-hint { display: none; }
+.nav.min .compass { width: 64px; height: 64px; }
+.nav.min .nav-dist { font-size: 26px; }
+.nav.min .nav-body { margin-top: 2px; gap: 10px; }
+
+/* ---------- кошик ---------- */
+.trash-head { width: 100%; margin-top: 10px; padding: 10px 12px; text-align: left; background: none; border: 1px dashed var(--border2); border-radius: 4px; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; display: flex; justify-content: space-between; }
+.trash-item { opacity: .8; }
