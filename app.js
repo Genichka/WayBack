@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.22.1';
+const APP_VERSION = '1.23.0';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -348,10 +348,7 @@ function onPos(p) {
   const a = c.accuracy;
   gpsBadge(a <= 15 ? 'ok' : a <= 40 ? 'mid' : 'bad', '±' + Math.round(a) + ' м');
 
-  // GPS курс як запасний варіант, якщо компаса немає
-  if (c.heading != null && !isNaN(c.heading) && (c.speed || 0) > 0.7 && Date.now() - S.lastCompass > 3000) {
-    S.heading = c.heading; S.headingSrc = 'gps';
-  }
+  trackCourse(c, ll);
 
   if (!meMarker) {
     meMarker = L.marker(ll, { icon: meIcon, zIndexOffset: 2000, interactive: false }).addTo(map);
@@ -412,9 +409,35 @@ function onOrient(e) {
   const so = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
   h = (h + so + 360) % 360;
   // згладжування
-  S.heading = S.headingSrc === 'compass' && S.heading != null ? (S.heading + angDiff(h, S.heading) * 0.3 + 360) % 360 : h;
-  S.headingSrc = 'compass'; S.lastCompass = Date.now();
+  S.cmpHeading = S.cmpHeading != null ? (S.cmpHeading + angDiff(h, S.cmpHeading) * 0.3 + 360) % 360 : h;
+  S.lastCompass = Date.now();
+  refreshHeading();
   updateHeadingUi();
+}
+
+/* ---------- напрям: куди ти йдеш / дивишся ----------
+   Два джерела. Коли рухаєшся - напрям руху (курс GPS або зміщення на 8+ м):
+   він надійний і не залежить від магнітів, заліза в машині чи некаліброваного
+   компаса. Коли стоїш - компас телефона. Старий курс GPS після зупинки не
+   використовуємо: розвернувся на місці - а він досі «дивиться» туди, куди йшов. */
+const COURSE_FRESH = 4000;
+function trackCourse(c, ll) {
+  const now = Date.now();
+  if (c.heading != null && !isNaN(c.heading) && (c.speed || 0) > 1) { S.course = c.heading; S.courseAt = now; }
+  else if (c.accuracy <= 20) {
+    if (!S.mvA || now - S.mvAt > 20000) { S.mvA = ll; S.mvAt = now; }
+    else if (dist(S.mvA, ll) >= 8) {
+      if (now - (S.courseAt || 0) > 1500) { S.course = bearing(S.mvA, ll); S.courseAt = now; }
+      S.mvA = ll; S.mvAt = now;
+    }
+  }
+  refreshHeading();
+}
+function refreshHeading() {
+  const now = Date.now();
+  if (S.course != null && now - S.courseAt < COURSE_FRESH) { S.heading = S.course; S.headingSrc = 'course'; }
+  else if (S.cmpHeading != null && now - S.lastCompass < 3000) { S.heading = S.cmpHeading; S.headingSrc = 'compass'; }
+  else { S.headingSrc = null; }
 }
 function bindCompass() {
   if (compassBound) return;
@@ -1400,8 +1423,8 @@ function updateTimer() {
 setInterval(updateTimer, 1000);
 
 function headingFresh() {
-  if (S.heading == null) return false;
-  return S.headingSrc === 'compass' ? Date.now() - S.lastCompass < 3000 : true;
+  refreshHeading();
+  return S.heading != null && !!S.headingSrc;
 }
 function updateHeadingUi() {
   const hasH = headingFresh();
@@ -1421,6 +1444,13 @@ function updateHeadingUi() {
 let mcRot = 0;
 function renderMapCompass() {
   const el = $('#mapCmp'); if (!el) return;
+  if (S.navOpen) {
+    el.classList.remove('off');
+    mcRot = smoothRot(mcRot, ROT.on ? -ROT.b : 0);
+    $('#mcRose').setAttribute('transform', `rotate(${mcRot.toFixed(1)})`);
+    $('#mcDeg').textContent = ROT.on ? 'за рухом' : 'північ ↑';
+    return;
+  }
   const hasH = headingFresh();
   el.classList.toggle('off', !hasH);
   if (hasH) {
@@ -1432,10 +1462,17 @@ function renderMapCompass() {
   }
 }
 $('#mapCmp').onclick = async () => {
+  if (S.navOpen) {                       // під час ведення: карта за рухом ⇄ північ угорі
+    S.settings.headUp = !headUp(); saveSettings();
+    setFollow(true); if (!headUp()) rotLayout(false);
+    navFrame(true); renderMapCompass();
+    toast(headUp() ? '🧭 Карта повертається за напрямом руху' : '🧭 Північ завжди вгорі');
+    return;
+  }
   if (needsCompassPermission() && !compassBound) { await enableCompass(); renderMapCompass(); return; }
   bindCompass();
   if (headingFresh()) {
-    const src = S.headingSrc === 'compass' ? 'за компасом' : 'за рухом GPS';
+    const src = S.headingSrc === 'compass' ? 'за компасом' : 'за напрямом руху';
     toast(`🧭 Телефон дивиться на ${dirName(S.heading)} (${Math.round(S.heading) % 360}°), ${src}. Червоний кінець — північ.`);
   } else {
     toast('Компас не відповідає. Поклади телефон рівно або почни йти — напрям візьмемо з GPS.', 'warn');
@@ -1485,7 +1522,7 @@ function renderNav() {
     else info.textContent = m === 'track' ? 'Немає записаного треку — веду по прямій.' : 'Маршрут недоступний — веду по прямій.';
   }
   if (hasH) {
-    hint.innerHTML = S.headingSrc === 'compass' ? 'Тримай телефон горизонтально. Іди за зеленою стрілкою.' : 'Напрям за рухом GPS — іди рівно, стрілка уточниться.';
+    hint.innerHTML = S.headingSrc === 'compass' ? 'Тримай телефон горизонтально. Іди за зеленою стрілкою.' : 'Напрям — за твоїм рухом. Іди за зеленою стрілкою.';
   } else if (needsCompassPermission() && !compassBound) {
     hint.innerHTML = 'Компас вимкнено.<br><button class="btn primary" id="cmpBtn">Увімкнути компас</button>';
     $('#cmpBtn').onclick = () => enableCompass();
@@ -1534,74 +1571,87 @@ function buildTicks() {
 buildTicks();
 
 
-/* ---------- кадр під час повернення ----------
-   Поки ведемо до точки, карта сама тримає в кадрі тебе і ціль: ідеш - кадр іде слідом,
-   підходиш - карта наближається, до останніх метрів - найдрібніший масштаб.
-   Якщо ціль далеко (у лісі буває кілометри), у кадрі ти і найближчі ~800 м шляху,
-   щоб видно було повороти, а не весь район дрібними цятками.
-   Масштаб змінюється спокійно: віддалити - одразу (щоб нічого не вилізло за край),
-   наблизити - лише коли це потрібно двічі поспіль. Потягнув карту пальцем -
-   кадр відпускає; кнопка ◎ повертає його. */
-const FRAME_FAR = 1500, FRAME_AHEAD = 800;
+/* ---------- ведення як у Google Maps ----------
+   Поки ведемо до точки, карта повертається за напрямом руху (куди йдеш - те вгорі),
+   ти - внизу по центру, а попереду видно шлях. Масштаб сам: пішки ~250 м уперед,
+   в авто - більше з ростом швидкості; підходиш до цілі - карта наближається.
+   Обертання - власне, без сторонніх бібліотек: сам контейнер карти стає квадратом
+   на діагональ екрана й повертається, а значки точок повертаються назад, щоб
+   підписи лишались рівними. Торкнувся карти - вона стає північчю вгору і відпускає
+   ведення; кнопка ◎ повертає все як було. Компас на карті перемикає режим. */
+const ROT = { on: false, b: 0 };
 let frameAt = 0, frameZoomIn = 0;
-function navFramePts() {
-  const t = target(), here = [S.pos.lat, S.pos.lon], tgt = [t.lat, t.lon];
-  const pts = [here];
-  const far = dist(here, tgt) > FRAME_FAR;
-  if (!far) pts.push(tgt);
-  if (S.rpath && S.rpath.length > 1 && S.settings.rmode !== 'direct') {
-    const at = nearestOnPath(S.rpath, here);
-    let acc = 0, prev = at.pt;
-    pts.push(at.pt);
-    for (let i = at.i + 1; i < S.rpath.length; i++) {
-      acc += dist(prev, S.rpath[i]); prev = S.rpath[i]; pts.push(S.rpath[i]);
-      if (acc > (far ? FRAME_AHEAD : Infinity)) break;
-    }
-  } else if (far) {
-    pts.push(pointAt(here, bearing(here, tgt), FRAME_AHEAD));      // точка по напряму на ціль
+const headUp = () => S.settings.headUp !== false;
+function rotLayout(on) {
+  if (ROT.on === on) return;
+  const wrap = $('.map-wrap'), m = $('#map');
+  const c = map.getCenter(), z = map.getZoom();
+  ROT.on = on;
+  document.body.classList.toggle('maprot', on);
+  if (on) {
+    const W = wrap.clientWidth, H = wrap.clientHeight, D = Math.ceil(Math.hypot(W, H)) + 4;
+    Object.assign(m.style, { width: D + 'px', height: D + 'px', left: (W - D) / 2 + 'px', top: (H - D) / 2 + 'px', right: 'auto', bottom: 'auto' });
+  } else {
+    m.style.cssText = ''; ROT.b = 0;
+    document.body.style.setProperty('--brg', '0deg');
   }
-  return { pts, keep: far ? [here] : [here, tgt] };
+  map.invalidateSize({ pan: false, animate: false });
+  map.setView(c, z, { animate: false });
 }
-function pointAt(from, brg, m) {
-  const d = m / R, b = rad(brg), la = rad(from[0]), lo = rad(from[1]);
-  const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));
-  const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
-  return [deg(la2), deg(lo2)];
+function setMapBearing(b) {
+  const nb = smoothRot(ROT.b, b);
+  if (Math.abs(nb - ROT.b) < 2) return;
+  ROT.b = nb;
+  $('#map').style.transform = `rotate(${(-ROT.b).toFixed(1)}deg)`;
+  document.body.style.setProperty('--brg', ROT.b.toFixed(1) + 'deg');
+  renderMapCompass();
 }
-function framePadding() {
-  const navH = S.navOpen ? ($('#nav').offsetHeight || 0) : 0;
-  return { paddingTopLeft: L.point(72, 20), paddingBottomRight: L.point(52, navH + 20) };
+/** Куди «дивиться» карта: напрям руху / компас; немає - напрям на ціль. */
+function wantBearing() {
+  if (!headUp()) return 0;
+  if (headingFresh()) return S.heading;
+  if (S.navBearing != null) return S.navBearing;
+  return ((ROT.b % 360) + 360) % 360;
 }
 function navFrame(force) {
   if (!S.navOpen || !S.follow || !S.pos || !target()) return;
   const now = Date.now();
-  if (!force && now - frameAt < 1500) return;
+  if (!force && now - frameAt < 800) return;
   frameAt = now;
-  const { pts, keep } = navFramePts();
-  const pad = framePadding();
-  const near = dist([S.pos.lat, S.pos.lon], [target().lat, target().lon]) < 60;
-  const opts = Object.assign({ maxZoom: near ? 19 : 18 }, pad);
-  const b = L.latLngBounds(pts);
-  let want;
-  try { want = map._getBoundsCenterZoom(b, opts); } catch (e) { map.fitBounds(b, opts); return; }
-  want.zoom = Math.max(3, Math.min(want.zoom, opts.maxZoom));
+  rotLayout(headUp());
+  const b = ROT.on ? wantBearing() : 0;
+  if (ROT.on) setMapBearing(b);
+  const here = [S.pos.lat, S.pos.lon], t = target();
+  const toGo = S.navDist != null ? S.navDist : dist(here, [t.lat, t.lon]);
+  const wrap = $('.map-wrap'), Hp = wrap.clientHeight;
+  const navH = $('#nav').offsetHeight || 0, Hv = Math.max(160, Hp - navH);
+  const yMe = Math.round(Hv * 0.74);                       // ти - нижче центру видимої частини
+  // скільки метрів показати попереду
+  const sp = S.pos.speed > 0 ? S.pos.speed : 0;
+  let ahead = S.settings.travel === 'car' ? Math.min(2000, Math.max(300, sp * 25)) : 250;
+  ahead = Math.min(ahead, Math.max(toGo * 1.25, 35));       // ціль ближче - наближаємо до неї
+  const avail = Math.max(60, yMe - 40);
+  const mpp0 = 156543.03 * Math.cos(rad(here[0]));          // метрів на піксель при масштабі 0
+  let zw = Math.floor(Math.log2(mpp0 * avail / ahead));
+  zw = Math.max(12, Math.min(19, zw));
   const cur = map.getZoom();
   let z = cur;
-  if (force || want.zoom < cur) { z = want.zoom; frameZoomIn = 0; }       // віддалити - одразу
-  else if (want.zoom > cur) { if (++frameZoomIn >= 2) { z = want.zoom; frameZoomIn = 0; } }
-  else frameZoomIn = 0;
-  // чи все важливе видно в робочій частині карти (без компаса, кнопок і картки ведення)
-  const size = map.getSize();
-  const inView = (ll) => {
-    const p = map.latLngToContainerPoint(ll);
-    return p.x >= pad.paddingTopLeft.x && p.y >= pad.paddingTopLeft.y
-      && p.x <= size.x - pad.paddingBottomRight.x && p.y <= size.y - pad.paddingBottomRight.y;
-  };
-  const off = map.latLngToContainerPoint(want.center).distanceTo(map.latLngToContainerPoint(map.getCenter()));
-  if (force || z !== cur || !keep.every(inView) || off > Math.min(size.x, size.y) * 0.2) {
-    map.setView(want.center, z, { animate: true, duration: 0.6 });
-  }
+  if (force || zw < cur) { z = zw; frameZoomIn = 0; } else if (zw > cur) { if (++frameZoomIn >= 2) { z = zw; frameZoomIn = 0; } } else frameZoomIn = 0;
+  // центр карти такий, щоб ти опинився в точці (середина, yMe) з урахуванням повороту
+  const br = rad(ROT.on ? ROT.b : 0), oy = yMe - Hp / 2;
+  const mx = -oy * Math.sin(br), my = oy * Math.cos(br);
+  const center = map.unproject(map.project(here, z).subtract(L.point(mx, my)), z);
+  const moved = map.latLngToContainerPoint(center).distanceTo(map.latLngToContainerPoint(map.getCenter()));
+  if (force || z !== cur || moved > 3) map.setView(center, z, { animate: true, duration: 0.5 });
 }
+window.addEventListener('resize', () => { if (ROT.on) { rotLayout(false); navFrame(true); } });
+// у режимі обертання перший дотик повертає карту північчю вгору і відпускає ведення
+$('#map').addEventListener('pointerdown', (e) => {
+  if (!ROT.on) return;
+  e.stopPropagation(); e.preventDefault();
+  setFollow(false); rotLayout(false); renderMapCompass();
+}, true);
+$('#map').addEventListener('touchstart', (e) => { if (ROT.on) { e.stopPropagation(); } }, { capture: true, passive: true });
 
 /* Картку ведення можна згорнути: лишаються назва, відстань і маленька стрілка,
    а карта отримує половину екрана назад. Вибір запамʼятовується. */
@@ -1635,6 +1685,7 @@ function openNav() {
 function closeNav() {
   S.navOpen = false; $('#nav').classList.add('hidden'); $('#navBtn').classList.remove('on');
   document.body.classList.remove('nav-open');
+  rotLayout(false); renderMapCompass();
   if (S.shownTrackId) $('#trkCard').classList.remove('hidden');
   updAskLater();
   // ведення скінчилось - лінію прибираємо, точка лишається

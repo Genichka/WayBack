@@ -111,7 +111,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 #pTarget { cursor: pointer; }
 
 /* map */
-.map-wrap { position: relative; flex: 1; min-height: 0; }
+.map-wrap { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 #map { position: absolute; inset: 0; background: #e8e6e1; }
 .leaflet-container { font: inherit; background: #e8e6e1; }
 .wb-tile { overflow: hidden; }
@@ -463,7 +463,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 /* під час ведення спливаючі повідомлення - над карткою, а не поверх неї */
 body.nav-open .toast { bottom: calc(var(--navh, 300px) + 70px + env(safe-area-inset-bottom)); }
 /* під час ведення є великий компас у картці - малий на карті ховаємо */
-body.nav-open .map-cmp { display: none; }
+/* під час ведення компас на карті показує, де північ, і перемикає режим «за рухом / північ угорі» */
 
 /* ---------- компактний рядок режимів ---------- */
 .quick { flex-wrap: wrap; }
@@ -493,3 +493,12 @@ body.nav-open .map-cmp { display: none; }
 /* ---------- кошик ---------- */
 .trash-head { width: 100%; margin-top: 10px; padding: 10px 12px; text-align: left; background: none; border: 1px dashed var(--border2); border-radius: 4px; color: var(--muted); font: inherit; font-size: 13px; cursor: pointer; display: flex; justify-content: space-between; }
 .trash-item { opacity: .8; }
+
+/* ---------- карта, що повертається за рухом ---------- */
+body.maprot #map { transition: transform .45s linear; transform-origin: 50% 50%; will-change: transform; }
+/* значки точок повертаємо назад - підписи лишаються рівними */
+body.maprot .pin { transform: rotate(var(--brg, 0deg)); transform-origin: 17px 40px; }
+/* підпис карти в поверненому квадраті опинився б за краєм - показуємо окремо */
+body.maprot .leaflet-control-container { display: none; }
+.rot-attr { display: none; position: absolute; right: 4px; bottom: calc(var(--navh, 0px) + 10px); z-index: 550; font-size: 9px; color: #555; background: rgba(255,255,255,.7); padding: 0 4px; border-radius: 2px; pointer-events: none; }
+body.maprot .rot-attr { display: block; }
