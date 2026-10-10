@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.19.0';
+const APP_VERSION = '1.19.1';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -1354,7 +1354,9 @@ $('#trackList').onclick = async (e) => {
   if (a.dataset.a === 'show') {
     if (S.shownTrackId === tr.id) { S.shownTrackId = null; histLine.setLatLngs([]); renderTrackList(); return; }
     S.shownTrackId = tr.id; histLine.setLatLngs(tr.pts.map((p) => [p[0], p[1]]));
-    closeSheet(); setFollow(false); map.fitBounds(histLine.getBounds().pad(0.15));
+    closeHist(); closeSheet(); setFollow(false);   // історія тепер в окремій панелі - її теж закрити, щоб карту було видно
+    toast(`👁️ ${fmtDate(tr.start)} · ${fmtDist(tr.dist)} — ще раз 👁️ в історії, щоб сховати`, 'good');
+    setTimeout(() => { try { map.invalidateSize(); map.fitBounds(histLine.getBounds().pad(0.15), { maxZoom: 17 }); } catch (err) { /* */ } }, 50);
   } else if (a.dataset.a === 'gpx') downloadGpx(tr);
   else if (a.dataset.a === 'del') {
     if (!(await confirmBox('Видалити трек?', `${fmtDate(tr.start)} · ${fmtDist(tr.dist)}`, 'Видалити'))) return;
