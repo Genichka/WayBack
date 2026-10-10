@@ -502,3 +502,14 @@ body.maprot .pin { transform: rotate(var(--brg, 0deg)); transform-origin: 17px 4
 body.maprot .leaflet-control-container { display: none; }
 .rot-attr { display: none; position: absolute; right: 4px; bottom: calc(var(--navh, 0px) + 10px); z-index: 550; font-size: 9px; color: #555; background: rgba(255,255,255,.7); padding: 0 4px; border-radius: 2px; pointer-events: none; }
 body.maprot .rot-attr { display: block; }
+
+/* ---------- заголовок у стилі WordHunter: «Way» сірим, «Back» синім ---------- */
+.brand-txt b.wb-title { font-family: Inter, Roboto, 'Segoe UI', system-ui, sans-serif; font-size: 18px; font-weight: 700; letter-spacing: -.4px; line-height: 1.1; }
+.wb-title .bw, .eua .bw { color: #ccccdc; }
+.wb-title .bh, .eua .bh { color: #6e9fff; }
+[data-theme="light"] .wb-title .bw, [data-theme="light"] .eua .bw { color: #24292e; }
+[data-theme="light"] .wb-title .bh, [data-theme="light"] .eua .bh { color: #1f62e0; }
+/* EnergyUA - канал автора */
+.item.eua { text-decoration: none; margin-top: 10px; }
+.item.eua .i-ico .bolt { width: 18px; height: 28px; display: block; margin: 0 auto; }
+.item.eua .i-main b { font-family: Inter, Roboto, 'Segoe UI', system-ui, sans-serif; font-weight: 700; letter-spacing: -.3px; }
