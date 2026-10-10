@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.21.1';
+const APP_VERSION = '1.21.2';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -255,6 +255,7 @@ function setLayer(id) {
     keepBuffer: 4, updateWhenZooming: false, updateWhenIdle: false,
   }).addTo(map);
   S.settings.layer = id; saveSettings();
+  if (typeof styleHistLine === 'function') try { styleHistLine(); } catch (e) { /* лінії ще не створені */ }
 }
 setLayer(S.settings.layer);
 map.on('moveend', () => { const c = map.getCenter(); LS.set('view', { c: [c.lat, c.lng], z: map.getZoom() }); updateDlInfo(); });
@@ -269,10 +270,25 @@ let meMarker = null, accCircle = null;
 const CASE = { color: '#0a0d13', opacity: .5, interactive: false, lineCap: 'round', lineJoin: 'round' };
 const trackCase = L.polyline([], Object.assign({}, CASE, { weight: 5 })).addTo(map);
 const trackLine = L.polyline([], { color: '#ffb300', weight: 2.6, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
-// слід з історії - суцільна червона лінія з темною облямівкою, щоб було видно на будь-якій карті
-const histCase  = L.polyline([], Object.assign({}, CASE, { weight: 8 })).addTo(map);
-const histLine  = L.polyline([], { color: '#ff2a2a', weight: 4.5, opacity: 1, lineCap: 'round', lineJoin: 'round' }).addTo(map);
+// Слід з історії - суцільна червона лінія. Малюється в окремому шарі зі змішуванням
+// «multiply»: на світлій карті червоне лягає на дорогу, а чорні написи (назви вулиць,
+// номери будинків) лишаються видно крізь лінію. На супутнику й темній карті таке
+// змішування з'їло б лінію, тож там вона звичайна, з темною облямівкою.
+map.createPane('histPane').style.zIndex = 405;
+const histRenderer = L.canvas({ pane: 'histPane', padding: 0.3 });
+const histCase  = L.polyline([], Object.assign({}, CASE, { weight: 8, renderer: histRenderer })).addTo(map);
+const histLine  = L.polyline([], { color: '#ff2a2a', weight: 4.5, opacity: 1, lineCap: 'round', lineJoin: 'round', renderer: histRenderer }).addTo(map);
 { const set = histLine.setLatLngs.bind(histLine); histLine.setLatLngs = (ll) => { histCase.setLatLngs(ll); return set(ll); }; }
+function styleHistLine() {
+  const light = ['osm', 'topo'].includes(S.settings.layer), z = map.getZoom();
+  map.getPane('histPane').classList.toggle('blend', light);
+  // ближче - тонше, щоб лінія не перекривала півкварталу
+  const w = z >= 18 ? 3 : z >= 16 ? 3.6 : 4.5;
+  histLine.setStyle({ weight: w, color: light ? '#ff1f1f' : '#ff2a2a' });
+  histCase.setStyle({ weight: light ? 0 : w + 3.5, opacity: light ? 0 : .5 });
+}
+map.on('zoomend', styleHistLine);
+styleHistLine();
 const routeCase = L.polyline([], Object.assign({}, CASE, { weight: 6 })).addTo(map);
 const routeLine = L.polyline([], { color: '#00d4ff', weight: 3.2, opacity: 1, interactive: false, lineCap: 'round', lineJoin: 'round' }).addTo(map);
 const guideCase = L.polyline([], Object.assign({}, CASE, { weight: 5 })).addTo(map);
