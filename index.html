@@ -71,6 +71,17 @@
     <button class="fab" id="fabFit" title="Показати все">⤢</button>
     <button class="fab" id="fabLayer" title="Шар карти">▦</button>
   </div>
+  <button class="map-cmp off" id="mapCmp" title="Компас" aria-label="Компас">
+    <svg viewBox="-50 -50 100 100" aria-hidden="true">
+      <circle r="46" class="mc-ring"/>
+      <g id="mcRose">
+        <path d="M0-38L8 0H-8z" class="mc-n"/><path d="M0 38L8 0H-8z" class="mc-s"/>
+        <text y="-24" class="mc-l">N</text>
+      </g>
+      <circle r="4" class="mc-hub"/>
+    </svg>
+    <span class="mc-deg" id="mcDeg">—</span>
+  </button>
   <div class="rec-badge hidden" id="recBadge"><i></i>ЗАПИС</div>
 
   <!-- navigation card -->

@@ -138,7 +138,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .fab.on { color: var(--blue); border-color: var(--blue); }
 
 .rec-badge {
-  position: absolute; left: 8px; top: 8px; z-index: 500; display: flex; align-items: center; gap: 5px;
+  position: absolute; left: 8px; top: 70px; z-index: 500; display: flex; align-items: center; gap: 5px;
   background: var(--panel); border: 1px solid var(--red); color: var(--red); font-weight: 600; font-size: 9.5px;
   padding: 3px 7px; border-radius: 3px; letter-spacing: .5px;
 }
@@ -439,3 +439,21 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .um-list { margin: 0 0 10px; }
 .um-warn { margin: 0 0 8px; font-size: 12.5px; color: var(--yellow); }
 .um-cur { margin: 0; font-size: 12.5px; color: var(--muted); }
+
+/* ---------- компас на карті ---------- */
+.map-cmp {
+  position: absolute; left: 8px; top: 8px; z-index: 500; width: 56px; padding: 3px 0 2px;
+  background: var(--panel); border: 1px solid var(--border2); border-radius: 6px; box-shadow: var(--shadow);
+  display: flex; flex-direction: column; align-items: center; gap: 1px; color: var(--text); cursor: pointer;
+}
+.map-cmp svg { width: 40px; height: 40px; display: block; }
+.map-cmp .mc-ring { fill: none; stroke: var(--border2); stroke-width: 3; }
+.map-cmp .mc-n { fill: #ff3b30; }
+.map-cmp .mc-s { fill: var(--muted); }
+.map-cmp .mc-l { fill: var(--strong); font-size: 15px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }
+.map-cmp .mc-hub { fill: var(--panel); stroke: var(--strong); stroke-width: 2; }
+.map-cmp #mcRose { transition: transform .25s linear; }
+.map-cmp .mc-deg { font-size: 9.5px; font-weight: 600; line-height: 1.1; white-space: nowrap; }
+.map-cmp.off svg { opacity: .45; }
+.map-cmp.off .mc-deg { color: var(--muted); font-weight: 400; }
+.map-cmp:active { transform: scale(.95); }

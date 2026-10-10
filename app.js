@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.19.2';
+const APP_VERSION = '1.20.0';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -259,6 +259,8 @@ function setLayer(id) {
 setLayer(S.settings.layer);
 map.on('moveend', () => { const c = map.getCenter(); LS.set('view', { c: [c.lat, c.lng], z: map.getZoom() }); updateDlInfo(); });
 map.on('dragstart', () => setFollow(false));
+map.getContainer().addEventListener('touchstart', (e) => { if (e.touches.length > 1) setFollow(false); }, { passive: true });
+map.getContainer().addEventListener('wheel', () => setFollow(false), { passive: true });
 
 const meIcon = L.divIcon({ className: '', html: '<div class="me"><div class="me-dir" id="meDir"></div><div class="me-dot"></div></div>', iconSize: [26, 26], iconAnchor: [13, 13] });
 let meMarker = null, accCircle = null;
@@ -303,10 +305,31 @@ function gpsBadge(state, text) {
   const b = $('#gpsBadge');
   if (b) { b.className = 'gps ' + state; b.querySelector('span').textContent = text; }
 }
+/* Згладжування GPS (фільтр Калмана). Телефон дає точку з похибкою 3-10 м, і вона
+   «гуляє» навіть коли стоїш. Фільтр зважує нову точку за її точністю: точна
+   майже одразу приймається, розмита - лише трохи посуває позицію. Наскільки
+   позиція може змінитись за секунду - залежить від швидкості, тож у машині
+   фільтр не відстає, а пішки прибирає тремтіння. */
+const KF = { lat: null, lon: null, v: 0, t: 0 };
+function kalman(lat, lon, acc, t, speed) {
+  acc = Math.max(acc || 10, 3);
+  const sp = speed > 0 ? speed : 0;
+  const q = S.settings.travel === 'car' ? Math.max(10, sp * 1.5) : Math.max(3, sp * 2);   // м/с
+  const dt = (t - KF.t) / 1000;
+  if (KF.lat == null || dt > 30 || dt < 0) { KF.lat = lat; KF.lon = lon; KF.v = acc * acc; KF.t = t; return [lat, lon]; }
+  KF.v += dt * q * q;
+  // стрибок далі, ніж фільтр вважає можливим утричі - це не шум, а справжній рух (тунель, перезапуск GPS)
+  if (dist([KF.lat, KF.lon], [lat, lon]) > 3 * (Math.sqrt(KF.v) + acc) + 50) { KF.lat = lat; KF.lon = lon; KF.v = acc * acc; KF.t = t; return [lat, lon]; }
+  const k = KF.v / (KF.v + acc * acc);
+  KF.lat += k * (lat - KF.lat); KF.lon += k * (lon - KF.lon);
+  KF.v = (1 - k) * KF.v; KF.t = t;
+  return [KF.lat, KF.lon];
+}
 function onPos(p) {
-  const c = p.coords;
-  S.pos = { lat: c.latitude, lon: c.longitude, acc: c.accuracy, alt: c.altitude, t: p.timestamp || Date.now(), speed: c.speed, heading: c.heading };
-  const ll = [c.latitude, c.longitude];
+  const c = p.coords, t = p.timestamp || Date.now();
+  const [flat, flon] = kalman(c.latitude, c.longitude, c.accuracy, t, c.speed);
+  S.pos = { lat: flat, lon: flon, raw: [c.latitude, c.longitude], acc: c.accuracy, alt: c.altitude, t, speed: c.speed, heading: c.heading };
+  const ll = [flat, flon];
   const a = c.accuracy;
   gpsBadge(a <= 15 ? 'ok' : a <= 40 ? 'mid' : 'bad', '±' + Math.round(a) + ' м');
 
@@ -321,7 +344,7 @@ function onPos(p) {
   } else { meMarker.setLatLng(ll); accCircle.setLatLng(ll).setRadius(a); }
 
   if (S.firstFix) { S.firstFix = false; map.setView(ll, Math.max(map.getZoom(), 16)); }
-  else if (S.follow) map.panTo(ll, { animate: true });
+  else if (S.follow) { if (S.navOpen && target()) navFrame(); else map.panTo(ll, { animate: true }); }
 
   if (S.pendingStart && a <= 50) { S.pendingStart = false; startTrack(); }
   autoRecord();
@@ -402,7 +425,14 @@ function recordPoint() {
   const last = tr.pts[tr.pts.length - 1];
   if (last) {
     const d = dist(last, cur), dt = (cur[2] - last[2]) / 1000;
-    if (d < Math.max(PROF().minStep, TRAV().minStep, p.acc * 0.4)) return;
+    // Крок за відстанню. Але на повороті чекати повний крок не можна: тоді слід
+    // зрізає кут прямою через двори. Тож якщо напрям змінився на 20°+, пишемо раніше.
+    if (d < Math.max(PROF().minStep, TRAV().minStep, p.acc * 0.4)) {
+      const prev = tr.pts[tr.pts.length - 2];
+      const turn = prev && d >= Math.max(4, p.acc * 0.5) && dist(prev, last) >= 3
+        && Math.abs(angDiff(bearing(last, cur), bearing(prev, last))) >= 20;
+      if (!turn) return;
+    }
     // Стрибок GPS - це НЕМОЖЛИВА швидкість, а не просто швидка.
     // Межа 55 м/с ≈ 198 км/год: машина, потяг і велосипед проходять,
     // а телепорт на сотні метрів за секунду - ні.
@@ -427,7 +457,8 @@ function startTrack(silent) {
     toast(`🚗 Точку «${pt.name}» позначено`, 'good');
   }
   if (!silent) S.autoOff = false;
-  S.track = { id: 't' + Date.now(), start: Date.now(), pts: [], dist: 0, target: target() ? target().name : null };
+  S.track = { id: 't' + Date.now(), start: Date.now(), pts: [], dist: 0, target: target() ? target().name : null,
+              travel: S.settings.travel, profile: S.settings.profile };
   trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   recordPoint(); saveTrack(true);
   wake(true); if (!silent) vibrate(40);
@@ -447,8 +478,13 @@ async function stopTrack() {
   if (!ok) return;
   S.autoOff = true;                         // більше не починати самому
   const tr = S.track; tr.end = Date.now();
+  if (S.pos) {   // останній крок - до самої точки зупинки
+    const last = tr.pts[tr.pts.length - 1], cur = [+S.pos.lat.toFixed(6), +S.pos.lon.toFixed(6), Date.now(), Math.round(S.pos.acc), null];
+    if (last && dist(last, cur) >= 3 && S.pos.acc <= PROF().maxAcc) { tr.dist += dist(last, cur); tr.pts.push(cur); }
+  }
   if (tr.pts.length > 1) {
     S.tracks.unshift(tr);
+    setTimeout(() => snapAndStore(tr), 1500);
     const dropped = trimTracks();
     LS.set('tracks', S.tracks);
     if (dropped) toast(`Історію підчищено: найстаріших треків прибрано ${dropped}`, 'warn');
@@ -847,9 +883,9 @@ const TRAVEL = {
   foot: { name: 'Пішки', ico: '🚶', costing: 'pedestrian', minStep: 0,
           osrm: 'https://routing.openstreetmap.de/routed-foot/route/v1/foot/',
           info: 'Маршрут дорогами веде вулицями, тротуарами й стежками.' },
-  car:  { name: 'Авто',  ico: '🚗', costing: 'auto', minStep: 20,
+  car:  { name: 'Авто',  ico: '🚗', costing: 'auto', minStep: 10,
           osrm: 'https://routing.openstreetmap.de/routed-car/route/v1/driving/',
-          info: 'Маршрут дорогами враховує проїзд і напрямок руху. Слід пишеться рідше.' },
+          info: 'Маршрут дорогами враховує проїзд і напрямок руху. На поворотах слід пишеться густіше.' },
 };
 const TRAV = () => TRAVEL[S.settings.travel] || TRAVEL.foot;
 const VALHALLA = 'https://valhalla1.openstreetmap.de/route';
@@ -914,6 +950,97 @@ async function askValhalla(from, to) {
   if (path.length < 2) throw new Error('empty');
   const km = tr.summary && tr.summary.length;
   return { path, len: km != null ? km * 1000 : null, snap: [], via: 'Valhalla' };
+}
+
+/* ---- прив'язка записаного сліду до доріг ----
+   GPS телефона гуляє на кілька метрів, тож слід іде поруч із дорогою, а не по ній.
+   Для прогулянок містом і поїздок авто просимо сервер «прикласти» слід до доріг
+   (map matching). У лісі й горах - ні: стежок там часто немає на карті, і сервер
+   потягнув би слід на найближчу дорогу. Результат перевіряємо: якщо він помітно
+   довший чи коротший за слід або відходить від нього - лишаємо записаний слід.
+   Прив'язаний слід зберігається в історії, тож далі працює й без інтернету. */
+function encodePoly6(pts) {
+  let out = '', plat = 0, plon = 0;
+  const enc = (v) => { v = v < 0 ? ~(v << 1) : v << 1; let s = ''; while (v >= 0x20) { s += String.fromCharCode((0x20 | (v & 0x1f)) + 63); v >>= 5; } return s + String.fromCharCode(v + 63); };
+  for (const [la, lo] of pts) {
+    const ilat = Math.round(la * 1e6), ilon = Math.round(lo * 1e6);
+    out += enc(ilat - plat) + enc(ilon - plon); plat = ilat; plon = ilon;
+  }
+  return out;
+}
+const pathLen = (pts) => { let l = 0; for (let i = 1; i < pts.length; i++) l += dist(pts[i - 1], pts[i]); return l; };
+async function snapGet(url, ms) {
+  const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), ms);
+  try { return await fetch(url, { signal: ctl.signal }); } finally { clearTimeout(timer); }
+}
+const snapAllowed = (tr) => (tr.travel || S.settings.travel) === 'car' || (tr.profile || S.settings.profile) === 'city';
+async function matchValhalla(pts, car) {
+  const body = { encoded_polyline: encodePoly6(pts), costing: car ? 'auto' : 'pedestrian',
+                 shape_match: 'map_snap', directions_type: 'none', trace_options: { search_radius: 30 } };
+  const r = await snapGet(`${VALHALLA.replace(/\/route$/, '/trace_route')}?json=${encodeURIComponent(JSON.stringify(body))}`, 15000);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  let out = [];
+  ((j.trip && j.trip.legs) || []).forEach((lg) => { if (lg.shape) out = out.concat(decodePoly6(lg.shape)); });
+  if (out.length < 2) throw new Error('empty');
+  return out;
+}
+async function matchOsrm(pts, car) {
+  const base = (car ? TRAVEL.car : TRAVEL.foot).osrm.replace('/route/', '/match/');
+  const u = base + pts.map((p) => `${p[1].toFixed(6)},${p[0].toFixed(6)}`).join(';')
+    + '?overview=full&geometries=geojson&gaps=ignore&tidy=true&radiuses=' + pts.map(() => 30).join(';');
+  const r = await snapGet(u, 15000);
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  const j = await r.json();
+  if (j.code && j.code !== 'Ok') throw new Error(j.code);
+  let out = [];
+  (j.matchings || []).forEach((m) => { if (m.geometry && m.geometry.coordinates) out = out.concat(m.geometry.coordinates.map((c) => [c[1], c[0]])); });
+  if (out.length < 2) throw new Error('empty');
+  return out;
+}
+/** Чи прив'язаний шматок справді той самий шлях, а не обʼїзд кварталом. */
+function matchSane(raw, m) {
+  const lr = pathLen(raw), lm = pathLen(m);
+  if (lr > 30 && (lm < lr * 0.8 || lm > lr * 1.35 + 40)) return false;
+  let far = 0;
+  for (const p of raw) if (nearestOnPath(m, p).d > 30) far++;
+  return far <= raw.length * 0.15;
+}
+/** Прив'язати трек. Повертає ламану або null, якщо не вийшло чи не треба. */
+async function snapTrack(tr) {
+  if (!tr || !tr.pts || tr.pts.length < 3 || !snapAllowed(tr) || !navigator.onLine) return null;
+  const car = (tr.travel || S.settings.travel) === 'car';
+  const pts = thin(tr.pts.map((p) => [p[0], p[1]]), car ? 8 : 5);
+  if (pts.length < 2) return null;
+  const CH = 90, out = [];
+  let snapped = 0;
+  for (let i = 0; i < pts.length - 1; i += CH - 1) {
+    const chunk = pts.slice(i, i + CH);
+    let m = null;
+    for (const ask of [matchValhalla, matchOsrm]) {
+      try { const r = await ask(chunk, car); if (matchSane(chunk, r)) { m = r; break; } } catch (e) { /* наступний сервер */ }
+    }
+    if (m) snapped++;
+    const part = m || chunk;
+    out.push(...(out.length ? part.slice(1) : part));
+  }
+  if (!snapped) return null;
+  return out.map((p) => [+p[0].toFixed(6), +p[1].toFixed(6)]);
+}
+/** Прив'язати й запамʼятати в історії. Тихо: без інтернету - просто лишається як є. */
+let snapBusy = null;
+async function snapAndStore(tr) {
+  if (!tr || tr.snap || !snapAllowed(tr) || !navigator.onLine) return false;
+  if (tr.snapTried && Date.now() - tr.snapTried < 10 * 60 * 1000) return false;   // не смикати сервер щоразу
+  if (snapBusy === tr.id) return false;
+  snapBusy = tr.id;
+  let res = null;
+  try { res = await snapTrack(tr); } finally { snapBusy = null; }
+  tr.snapTried = Date.now();
+  if (res) tr.snap = res;
+  const i = S.tracks.findIndex((x) => x.id === tr.id);
+  if (i >= 0) { S.tracks[i] = tr; LS.set('tracks', S.tracks); }
+  return !!res;
 }
 
 /** Дорога не буває коротшою за пряму. Коротша - значить це не дорога. */
@@ -1015,6 +1142,7 @@ function drawReturn() {
     if (!S.navOpen) { guideLine.setLatLngs([]); guideCase.setLatLngs([]); }
   }
   drawChevrons();
+  if (S.navOpen && S.follow) navFrame();       // зʼявився або змінився шлях - підлаштувати кадр
 }
 
 function drawChevrons() {
@@ -1206,7 +1334,34 @@ function updateHeadingUi() {
     ma.classList.remove('off'); ma.style.transform = `rotate(${rel - 90}deg)`;
   } else ma.classList.add('off');
   if (S.navOpen) renderCompass();
+  renderMapCompass();
 }
+
+/* Компас на карті: стрілка завжди показує на північ, підпис - куди дивиться телефон.
+   Карта сама орієнтована північчю вгору, тож компас допомагає звірити її з місцевістю. */
+let mcRot = 0;
+function renderMapCompass() {
+  const el = $('#mapCmp'); if (!el) return;
+  const hasH = headingFresh();
+  el.classList.toggle('off', !hasH);
+  if (hasH) {
+    mcRot = smoothRot(mcRot, -S.heading);
+    $('#mcRose').setAttribute('transform', `rotate(${mcRot.toFixed(1)})`);
+    $('#mcDeg').textContent = `${Math.round(S.heading) % 360}° ${dirName(S.heading)}`;
+  } else {
+    $('#mcDeg').textContent = needsCompassPermission() && !compassBound ? 'увімкнути' : 'немає';
+  }
+}
+$('#mapCmp').onclick = async () => {
+  if (needsCompassPermission() && !compassBound) { await enableCompass(); renderMapCompass(); return; }
+  bindCompass();
+  if (headingFresh()) {
+    const src = S.headingSrc === 'compass' ? 'за компасом' : 'за рухом GPS';
+    toast(`🧭 Телефон дивиться на ${dirName(S.heading)} (${Math.round(S.heading) % 360}°), ${src}. Червоний кінець — північ.`);
+  } else {
+    toast('Компас не відповідає. Поклади телефон рівно або почни йти — напрям візьмемо з GPS.', 'warn');
+  }
+};
 
 let roseRot = 0, arrowRot = 0; // накопичувальні кути для плавного повороту без стрибків через 360°
 function smoothRot(prev, next) { return prev + angDiff(next, ((prev % 360) + 360) % 360); }
@@ -1285,18 +1440,86 @@ function buildTicks() {
 }
 buildTicks();
 
+
+/* ---------- кадр під час повернення ----------
+   Поки ведемо до точки, карта сама тримає в кадрі тебе і ціль: ідеш - кадр іде слідом,
+   підходиш - карта наближається, до останніх метрів - найдрібніший масштаб.
+   Якщо ціль далеко (у лісі буває кілометри), у кадрі ти і найближчі ~800 м шляху,
+   щоб видно було повороти, а не весь район дрібними цятками.
+   Масштаб змінюється спокійно: віддалити - одразу (щоб нічого не вилізло за край),
+   наблизити - лише коли це потрібно двічі поспіль. Потягнув карту пальцем -
+   кадр відпускає; кнопка ◎ повертає його. */
+const FRAME_FAR = 1500, FRAME_AHEAD = 800;
+let frameAt = 0, frameZoomIn = 0;
+function navFramePts() {
+  const t = target(), here = [S.pos.lat, S.pos.lon], tgt = [t.lat, t.lon];
+  const pts = [here];
+  const far = dist(here, tgt) > FRAME_FAR;
+  if (!far) pts.push(tgt);
+  if (S.rpath && S.rpath.length > 1 && S.settings.rmode !== 'direct') {
+    const at = nearestOnPath(S.rpath, here);
+    let acc = 0, prev = at.pt;
+    pts.push(at.pt);
+    for (let i = at.i + 1; i < S.rpath.length; i++) {
+      acc += dist(prev, S.rpath[i]); prev = S.rpath[i]; pts.push(S.rpath[i]);
+      if (acc > (far ? FRAME_AHEAD : Infinity)) break;
+    }
+  } else if (far) {
+    pts.push(pointAt(here, bearing(here, tgt), FRAME_AHEAD));      // точка по напряму на ціль
+  }
+  return { pts, keep: far ? [here] : [here, tgt] };
+}
+function pointAt(from, brg, m) {
+  const d = m / R, b = rad(brg), la = rad(from[0]), lo = rad(from[1]);
+  const la2 = Math.asin(Math.sin(la) * Math.cos(d) + Math.cos(la) * Math.sin(d) * Math.cos(b));
+  const lo2 = lo + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(la), Math.cos(d) - Math.sin(la) * Math.sin(la2));
+  return [deg(la2), deg(lo2)];
+}
+function framePadding() {
+  const navH = S.navOpen ? ($('#nav').offsetHeight || 0) : 0;
+  return { paddingTopLeft: L.point(72, 20), paddingBottomRight: L.point(52, navH + 20) };
+}
+function navFrame(force) {
+  if (!S.navOpen || !S.follow || !S.pos || !target()) return;
+  const now = Date.now();
+  if (!force && now - frameAt < 1500) return;
+  frameAt = now;
+  const { pts, keep } = navFramePts();
+  const pad = framePadding();
+  const near = dist([S.pos.lat, S.pos.lon], [target().lat, target().lon]) < 60;
+  const opts = Object.assign({ maxZoom: near ? 19 : 18 }, pad);
+  const b = L.latLngBounds(pts);
+  let want;
+  try { want = map._getBoundsCenterZoom(b, opts); } catch (e) { map.fitBounds(b, opts); return; }
+  want.zoom = Math.max(3, Math.min(want.zoom, opts.maxZoom));
+  const cur = map.getZoom();
+  let z = cur;
+  if (force || want.zoom < cur) { z = want.zoom; frameZoomIn = 0; }       // віддалити - одразу
+  else if (want.zoom > cur) { if (++frameZoomIn >= 2) { z = want.zoom; frameZoomIn = 0; } }
+  else frameZoomIn = 0;
+  // чи все важливе видно в робочій частині карти (без компаса, кнопок і картки ведення)
+  const size = map.getSize();
+  const inView = (ll) => {
+    const p = map.latLngToContainerPoint(ll);
+    return p.x >= pad.paddingTopLeft.x && p.y >= pad.paddingTopLeft.y
+      && p.x <= size.x - pad.paddingBottomRight.x && p.y <= size.y - pad.paddingBottomRight.y;
+  };
+  const off = map.latLngToContainerPoint(want.center).distanceTo(map.latLngToContainerPoint(map.getCenter()));
+  if (force || z !== cur || !keep.every(inView) || off > Math.min(size.x, size.y) * 0.2) {
+    map.setView(want.center, z, { animate: true, duration: 0.6 });
+  }
+}
+
 function openNav() {
   if (!target()) { toast('Спочатку познач точку', 'warn'); return; }
   S.navOpen = true; $('#nav').classList.remove('hidden'); $('#navBtn').classList.add('on');
   enableCompass(); wake(true);
   const t = target();
   setReturnMode(S.settings.rmode, true);
-  if (S.pos) {
-    setFollow(false);
-    const pts = (S.rpath && S.rpath.length > 1) ? S.rpath.slice() : [[S.pos.lat, S.pos.lon], [t.lat, t.lon]];
-    map.fitBounds(L.latLngBounds(pts).pad(0.25), { paddingBottomRight: [0, 260], maxZoom: 17 });
-  }
   renderNav(); renderCompass();
+  // карта веде тебе: у кадрі ти і ціль (картка ведення вже на екрані, її висоту враховуємо)
+  if (S.pos) { setFollow(true); requestAnimationFrame(() => navFrame(true)); }
+  else if (t) map.setView([t.lat, t.lon], Math.max(map.getZoom(), 16));
 }
 function closeNav() {
   S.navOpen = false; $('#nav').classList.add('hidden'); $('#navBtn').classList.remove('on');
@@ -1356,7 +1579,12 @@ $('#trackList').onclick = async (e) => {
   const tr = S.tracks.find((x) => x.id === it.dataset.id); if (!tr) return;
   if (a.dataset.a === 'show') {
     if (S.shownTrackId === tr.id) { S.shownTrackId = null; histLine.setLatLngs([]); renderTrackList(); toast('Слід сховано'); return; }
-    S.shownTrackId = tr.id; histLine.setLatLngs(tr.pts.map((p) => [p[0], p[1]]));
+    S.shownTrackId = tr.id; histLine.setLatLngs(tr.snap || tr.pts.map((p) => [p[0], p[1]]));
+    if (!tr.snap && snapAllowed(tr) && navigator.onLine) {
+      snapAndStore(tr).then((ok) => {
+        if (ok && S.shownTrackId === tr.id) { histLine.setLatLngs(tr.snap); toast('🛣️ Слід прикладено до доріг', 'good'); }
+      });
+    }
     closeHist(); closeSheet(); setFollow(false);   // історія тепер в окремій панелі - її теж закрити, щоб карту було видно
     toast(`👁️ ${fmtDate(tr.start)} · ${fmtDist(tr.dist)} — ще раз 👁️ в історії, щоб сховати`, 'good');
     setTimeout(() => { try { map.invalidateSize(); map.fitBounds(histLine.getBounds().pad(0.25), { maxZoom: 17 }); } catch (err) { /* */ } }, 50);
@@ -1931,7 +2159,9 @@ $('#navClose').onclick = closeNav;
 $('#pTarget').onclick = () => (target() ? openNav() : openSheet('points'));
 $('#fabMe').onclick = () => {
   setFollow(true);
-  if (S.pos) map.setView([S.pos.lat, S.pos.lon], Math.max(map.getZoom(), 16)); else toast('Шукаю GPS…');
+  if (!S.pos) { toast('Шукаю GPS…'); return; }
+  if (S.navOpen && target()) navFrame(true);
+  else map.setView([S.pos.lat, S.pos.lon], Math.max(map.getZoom(), 16));
 };
 $('#fabFit').onclick = () => {
   const ll = S.points.map((p) => [p.lat, p.lon]);
