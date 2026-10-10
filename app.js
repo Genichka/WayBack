@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.21.0';
+const APP_VERSION = '1.21.1';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -1576,6 +1576,7 @@ function navFrame(force) {
 function openNav() {
   if (!target()) { toast('Спочатку познач точку', 'warn'); return; }
   S.navOpen = true; $('#nav').classList.remove('hidden'); $('#navBtn').classList.add('on');
+  $('#trkCard').classList.add('hidden');
   enableCompass(); wake(true);
   const t = target();
   setReturnMode(S.settings.rmode, true);
@@ -1586,6 +1587,7 @@ function openNav() {
 }
 function closeNav() {
   S.navOpen = false; $('#nav').classList.add('hidden'); $('#navBtn').classList.remove('on');
+  if (S.shownTrackId) $('#trkCard').classList.remove('hidden');
   updAskLater();
   // ведення скінчилось - лінію прибираємо, точка лишається
   if (routeAbort) { routeAbort.abort(); routeAbort = null; }
@@ -1662,6 +1664,51 @@ function trackStatsHtml(tr) {
   </div>${notes.length ? `<div class="trk-notes">${notes.join(' · ')}</div>` : ''}`;
 }
 
+/* ---------- маршрут з архіву на карті ----------
+   Архів закривається, слід - на карті, а внизу компактна картка з головним:
+   відстань, час, швидкість. Повні характеристики розгортаються в самій картці,
+   і карта щоразу підлаштовує кадр, щоб маршрут було видно над нею. */
+function fitShownTrack() {
+  if (!histLine.getLatLngs().length) return;
+  const card = $('#trkCard'), h = card.classList.contains('hidden') ? 0 : card.offsetHeight;
+  try {
+    map.invalidateSize();
+    map.fitBounds(histLine.getBounds(), { paddingTopLeft: L.point(72, 24), paddingBottomRight: L.point(52, h + 24), maxZoom: 17 });
+  } catch (e) { /* */ }
+}
+function renderTrackCard(tr) {
+  const st = trackStats(tr);
+  $('#tcName').textContent = `${fmtDate(tr.start)}${tr.target ? ' · ' + tr.target : ''}`;
+  const v = (k, val) => `<div><span>${k}</span><b>${val}</b></div>`;
+  $('#tcSum').innerHTML = v('Відстань', fmtDist(tr.dist)) + v('Час', fmtDur(st.dur)) + v('Сер. швидк.', fmtSpeed(st.avg)) + v('Макс.', fmtSpeed(st.max));
+  $('#tcFull').innerHTML = trackStatsHtml(tr);
+}
+function showTrack(tr) {
+  S.shownTrackId = tr.id;
+  histLine.setLatLngs(tr.snap || tr.pts.map((p) => [p[0], p[1]]));
+  closeHist(); closeSheet(); setFollow(false);
+  renderTrackCard(tr);
+  $('#tcFull').classList.add('hidden'); $('#tcMore').textContent = '▴ Усі характеристики';
+  if (!S.navOpen) $('#trkCard').classList.remove('hidden');
+  requestAnimationFrame(fitShownTrack);
+  if (!tr.snap && snapAllowed(tr) && navigator.onLine) {
+    snapAndStore(tr).then((ok) => {
+      if (ok && S.shownTrackId === tr.id) { histLine.setLatLngs(tr.snap); renderTrackCard(tr); toast('🛣️ Слід прикладено до доріг', 'good'); }
+    });
+  }
+}
+function hideTrack() {
+  S.shownTrackId = null; histLine.setLatLngs([]);
+  $('#trkCard').classList.add('hidden');
+}
+$('#tcClose').onclick = () => { hideTrack(); toast('Слід сховано'); };
+$('#tcArch').onclick = () => { $('#trkCard').classList.add('hidden'); openHist(); };
+$('#tcMore').onclick = () => {
+  const full = $('#tcFull'), open = full.classList.toggle('hidden') === false;
+  $('#tcMore').textContent = open ? '▾ Згорнути' : '▴ Усі характеристики';
+  requestAnimationFrame(fitShownTrack);
+};
+
 /* ---------- tracks history ---------- */
 function renderTrackList() {
   const el = $('#trackList');
@@ -1677,15 +1724,15 @@ function renderTrackList() {
             `<b class="${pct > 85 ? 'c-orange' : ''}">${kb < 1024 ? kb.toFixed(0) + ' КБ' : (kb / 1024).toFixed(1) + ' МБ'} · ${pct}%</b></div>`;
   }
   html += S.tracks.map((t) => {
-    const st = trackStats(t), open = t.id === S.openTrackId;
-    return `<div class="item trk${t.id === S.shownTrackId ? ' tgt' : ''}${open ? ' open' : ''}" data-id="${t.id}">
+    const st = trackStats(t);
+    return `<div class="item trk${t.id === S.shownTrackId ? ' tgt' : ''}" data-id="${t.id}">
       <span class="i-ico">${t.travel === 'car' ? '🚗' : '🥾'}</span>
-      <div class="i-main" data-a="info"><b>${fmtDate(t.start)}${t.target ? ' · ' + esc(t.target) : ''}</b><small>${fmtDist(t.dist)} · ${fmtDur(st.dur)} · ${fmtSpeed(st.avg)} <span class="trk-more">${open ? '▴' : '▾ деталі'}</span></small></div>
+      <div class="i-main" data-a="open"><b>${fmtDate(t.start)}${t.target ? ' · ' + esc(t.target) : ''}</b><small>${fmtDist(t.dist)} · ${fmtDur(st.dur)} · ${fmtSpeed(st.avg)}</small></div>
       <div class="i-acts">
         <button data-a="show" class="${t.id === S.shownTrackId ? 'on' : ''}" title="Показати">👁️</button>
         <button data-a="gpx" title="GPX">⬇️</button>
         <button data-a="del" title="Видалити">🗑️</button>
-      </div>${open ? trackStatsHtml(t) : ''}</div>`;
+      </div></div>`;
   }).join('');
   el.innerHTML = html;
 }
@@ -1693,25 +1740,13 @@ $('#trackList').onclick = async (e) => {
   if (e.target.closest('[data-cur]')) { downloadGpx(S.track); return; }
   const a = e.target.closest('[data-a]'), it = e.target.closest('[data-id]'); if (!a || !it) return;
   const tr = S.tracks.find((x) => x.id === it.dataset.id); if (!tr) return;
-  if (a.dataset.a === 'info') {                  // торкнувся назви - розгорнути характеристики
-    S.openTrackId = S.openTrackId === tr.id ? null : tr.id; renderTrackList(); return;
-  }
-  if (a.dataset.a === 'show') {
-    if (S.shownTrackId === tr.id) { S.shownTrackId = null; histLine.setLatLngs([]); renderTrackList(); toast('Слід сховано'); return; }
-    S.shownTrackId = tr.id; histLine.setLatLngs(tr.snap || tr.pts.map((p) => [p[0], p[1]]));
-    if (!tr.snap && snapAllowed(tr) && navigator.onLine) {
-      snapAndStore(tr).then((ok) => {
-        if (ok && S.shownTrackId === tr.id) { histLine.setLatLngs(tr.snap); toast('🛣️ Слід прикладено до доріг', 'good'); }
-      });
-    }
-    closeHist(); closeSheet(); setFollow(false);   // історія тепер в окремій панелі - її теж закрити, щоб карту було видно
-    toast(`👁️ ${fmtDate(tr.start)} · ${fmtDist(tr.dist)} — ще раз 👁️ в історії, щоб сховати`, 'good');
-    setTimeout(() => { try { map.invalidateSize(); map.fitBounds(histLine.getBounds().pad(0.25), { maxZoom: 17 }); } catch (err) { /* */ } }, 50);
-  } else if (a.dataset.a === 'gpx') downloadGpx(tr);
+  if (a.dataset.a === 'show' && S.shownTrackId === tr.id) { hideTrack(); renderTrackList(); toast('Слід сховано'); return; }
+  if (a.dataset.a === 'show' || a.dataset.a === 'open') showTrack(tr);
+  else if (a.dataset.a === 'gpx') downloadGpx(tr);
   else if (a.dataset.a === 'del') {
     if (!(await confirmBox('Видалити трек?', `${fmtDate(tr.start)} · ${fmtDist(tr.dist)}`, 'Видалити'))) return;
     S.tracks = S.tracks.filter((x) => x.id !== tr.id); LS.set('tracks', S.tracks);
-    if (S.shownTrackId === tr.id) { S.shownTrackId = null; histLine.setLatLngs([]); }
+    if (S.shownTrackId === tr.id) hideTrack();
     renderTrackList();
   }
 };
@@ -2123,8 +2158,8 @@ function showTab(tab) {
 $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); };
 $('#sheet').onclick = (e) => { if (e.target.closest('[data-close]')) closeSheet(); };
 $('#menuBtn').onclick = () => openSheet();
-function openHist() { closeSheet(); $('#histSheet').classList.remove('hidden'); renderTrackList(); }
-function closeHist() { $('#histSheet').classList.add('hidden'); }
+function openHist() { closeSheet(); $('#trkCard').classList.add('hidden'); $('#histSheet').classList.remove('hidden'); renderTrackList(); }
+function closeHist() { $('#histSheet').classList.add('hidden'); if (S.shownTrackId && !S.navOpen) $('#trkCard').classList.remove('hidden'); }
 $('#histBtn').onclick = openHist;
 $('#histSheet').onclick = (e) => { if (e.target.closest('[data-hclose]')) closeHist(); };
 $('#scanBtn').onclick = () => { closeSheet(); setTimeout(scanQr, 120); };

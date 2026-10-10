@@ -84,6 +84,20 @@
   </button>
   <div class="rec-badge hidden" id="recBadge"><i></i>ЗАПИС</div>
 
+  <!-- картка сліду з архіву: внизу карти, щоб маршрут було видно -->
+  <div class="trk-dock hidden" id="trkCard">
+    <div class="trk-card">
+      <div class="trk-head">
+        <div class="trk-title"><div class="p-title">Маршрут з архіву</div><div class="trk-name" id="tcName">—</div></div>
+        <button class="icon-btn" id="tcArch" title="До архіву" aria-label="До архіву">☰</button>
+        <button class="icon-btn" id="tcClose" title="Сховати слід" aria-label="Сховати слід">✕</button>
+      </div>
+      <div class="trk-sum" id="tcSum"></div>
+      <button class="trk-toggle" id="tcMore">▴ Усі характеристики</button>
+      <div class="trk-full hidden" id="tcFull"></div>
+    </div>
+  </div>
+
   <!-- navigation card -->
   <div class="nav hidden" id="nav">
     <div class="nav-card">
@@ -251,7 +265,7 @@
       <h2>Мої прогулянки</h2>
       <button class="icon-btn" data-hclose aria-label="Закрити">✕</button>
     </div>
-    <p class="note lead">Торкнись назви — характеристики маршруту. 👁️ показує слід на карті, ⬇️ зберігає у файл GPX.</p>
+    <p class="note lead">Торкнись маршруту — він відкриється на карті з характеристиками. ⬇️ зберігає у файл GPX.</p>
     <div class="list" id="trackList"></div>
   </div>
 </div>
