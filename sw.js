@@ -1,5 +1,9 @@
-/* WayBack service worker: офлайн-оболонка + кеш плиток карти */
-const VERSION = 'wayback-v1.18.0';
+/* WayBack service worker: офлайн-оболонка + кеш плиток карти.
+   Цей файл між версіями НЕ змінюється (як у WordHunter і EnergyUA Junior): інакше браузер
+   сам поставить новий service worker, і додаток оновиться без дозволу.
+   Нову версію ставить сам WayBack після «🔄 Оновити»: чистить кеш оболонки (карти лишає),
+   знімає service worker і перезавантажується. Номер версії - у app.js і version.json. */
+const CACHE = 'wayback-app';
 const TILE_CACHE = 'wayback-tiles';
 const SHELL = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
@@ -8,17 +12,19 @@ const SHELL = [
 const OPTIONAL = ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
 const TILE_HOSTS = /(^|\.)(tile\.openstreetmap\.org|tile\.opentopomap\.org|arcgisonline\.com)$/;
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
+const fresh = (u) => new Request(u, { cache: 'reload' });
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION)
-    .then((c) => c.addAll(SHELL).then(() => Promise.all(OPTIONAL.map((u) => c.add(u).catch(() => {})))))
+  e.waitUntil(caches.open(CACHE)
+    .then((c) => Promise.all(SHELL.map((u) => c.add(fresh(u))))
+      .then(() => Promise.all(OPTIONAL.map((u) => c.add(fresh(u)).catch(() => {})))))
     .then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== VERSION && k !== TILE_CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE && k !== TILE_CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -49,31 +55,24 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // файли додатку: спершу мережа (щоб оновлення з'являлось одразу),
-  // але не довше 3.5 с — далі кеш. Без мережі — завжди кеш.
-  if (url.origin === self.location.origin) {
-    // запити з ?t=... — це перевірка оновлення, повз кеш
-    if (url.search) { e.respondWith(fetch(req).catch(() => new Response('', { status: 504 }))); return; }
-    e.respondWith((async () => {
-      const cache = await caches.open(VERSION);
-      const cached = () => cache.match(req, { ignoreSearch: true })
-        .then((r) => r || (req.mode === 'navigate' ? cache.match('index.html') : null));
-      if (!navigator.onLine) {
-        const hit = await cached();
-        if (hit) return hit;
-      }
-      try {
-        const ctl = new AbortController();
-        const timer = setTimeout(() => ctl.abort(), 3500);
-        const res = await fetch(new Request(req.url, { cache: 'reload' }), { signal: ctl.signal });
-        clearTimeout(timer);
-        if (res && res.ok) { cache.put(req, res.clone()); return res; }
-        throw new Error('bad status');
-      } catch (err) {
-        const hit = await cached();
-        if (hit) return hit;
-        return new Response('', { status: 504 });
-      }
-    })());
+  if (url.origin !== self.location.origin) return;
+  // version.json і запити з ?t=... - перевірка оновлення, лише мережа
+  if (url.pathname.endsWith('/version.json') || url.searchParams.has('t')) {
+    e.respondWith(fetch(req).catch(() => new Response('', { status: 504 })));
+    return;
   }
+  // файли додатку: спершу збережене (так нова версія не підміняє стару сама), інакше мережа
+  e.respondWith((async () => {
+    const cache = await caches.open(CACHE);
+    const hit = await cache.match(req, { ignoreSearch: true })
+      || (req.mode === 'navigate' ? await cache.match('index.html') || await cache.match('./') : null);
+    if (hit) return hit;
+    try {
+      const res = await fetch(req);
+      if (res && res.ok) cache.put(req, res.clone());
+      return res;
+    } catch (err) {
+      return new Response('', { status: 504, statusText: 'offline' });
+    }
+  })());
 });

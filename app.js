@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.18.0';
+const APP_VERSION = '1.19.0';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -169,7 +169,7 @@ function modal({ title, html, ok = 'Зберегти', cancel = 'Скасува�
         try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
       }, 260));
     });
-    const close = (val) => { $('#modal').classList.add('hidden'); $('#mOk').onclick = $('#mCancel').onclick = null; resolve(val); };
+    const close = (val) => { $('#modal').classList.add('hidden'); $('#mOk').onclick = $('#mCancel').onclick = null; resolve(val); updAskLater(); };
     $('#mOk').onclick = () => { const v = validate ? validate($('#mBody')) : true; if (v !== false && v !== undefined) close(v); };
     $('#mCancel').onclick = () => close(null);
   });
@@ -454,6 +454,7 @@ async function stopTrack() {
   trackLine.setLatLngs([]); trackCase.setLatLngs([]);
   if (!S.navOpen) wake(false);
   updateTrackBtn(); updateAll();
+  updAskLater();
   toast(S.settings.autorec ? 'Запис зупинено. Слід більше не пишеться — натисни «Старт»'
                            : 'Трек збережено', 'good');
 }
@@ -1296,6 +1297,7 @@ function openNav() {
 }
 function closeNav() {
   S.navOpen = false; $('#nav').classList.add('hidden'); $('#navBtn').classList.remove('on');
+  updAskLater();
   // ведення скінчилось - лінію прибираємо, точка лишається
   if (routeAbort) { routeAbort.abort(); routeAbort = null; }
   S.rpath = null; S.rsrc = null; S.rpathLen = null; S.rpathFrom = null; S.rErr = null;
@@ -1539,7 +1541,7 @@ $('#clearBtn').onclick = clearCurrent;
 function renderSettings() {
   seg($('#themeSeg'), [['dark', 'Темна'], ['light', 'Світла']], S.settings.theme, (v) => { S.settings.theme = v; saveSettings(); applyTheme(); });
   $('#setWake').checked = S.settings.wake; $('#setVib').checked = S.settings.vibrate; $('#setAuto').checked = S.settings.auto; $('#setAutoRec').checked = S.settings.autorec;
-  updStatus(`Версія ${APP_VERSION}`);
+  updBadge();
   const vv = $('#updVer'); if (vv) vv.textContent = `WayBack v${APP_VERSION}`;
   $('#verNote').textContent = `WayBack v${APP_VERSION} · дані зберігаються лише на цьому пристрої`;
 }
@@ -1621,40 +1623,109 @@ $('#exitBtn').onclick = async () => {
   try { window.close(); } catch (e) { /* */ }
   setTimeout(() => toast('Закрий вікно свайпом або кнопкою «Назад» — дані збережено', 'good'), 400);
 };
-const _ub = $('#updateBtn'); if (_ub) _ub.onclick = checkUpdate;
-$('#updBtn').onclick = checkUpdate;
-{ const t = $('#verTag'); if (t) t.textContent = 'v' + APP_VERSION; }
-{ const v = $('#updVer'); if (v) v.textContent = `WayBack v${APP_VERSION}`; }
-updStatus(`Версія ${APP_VERSION}`);
+/* ---------- оновлення: як в EnergyUA Junior і WordHunter ----------
+   Нова версія ставиться лише з дозволу. Додаток тихо читає version.json поруч із собою:
+   {"version": "1.19.1", "changes": ["…", "…"]}. Є новіша - у шапці «🆕 є версія …»,
+   кнопка оновлення світиться, і WayBack питає «Оновити / Пізніше» з описом змін.
+   Під час запису треку чи ведення до точки не питає - спитає, коли закінчиш.
+   Точки, треки й завантажені карти при оновленні зберігаються. */
+let UPD = null, updBusy = false, updAsked = '';
+const vNum = (v) => String(v || '').split('.').map((x) => +x || 0);
+function vNewer(a, b) { const x = vNum(a), y = vNum(b); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) > (y[i] || 0); } return false; }
 function updStatus(t) {
   ['#updSub', '#updSub2'].forEach((sel) => { const e = $(sel); if (e) e.textContent = t; });
 }
-async function checkUpdate() {
-  const btn = $('#updBtn');
-  if (btn) { btn.disabled = true; btn.classList.add('busy'); }   // іконку не чіпаємо, лише крутимо
-  const done = () => { if (btn) { btn.disabled = false; btn.classList.remove('busy'); } };
-  const sub = { set textContent(t) { updStatus(t); } };
-  if (!navigator.onLine) { sub.textContent = `Версія ${APP_VERSION} · немає інтернету`; toast('Немає інтернету — оновлення потребує звʼязку', 'warn'); done(); return; }
-  sub.textContent = 'Перевіряю…';
-  if (NATIVE) { await checkApkUpdate(sub); done(); return; }
-  let remote = null;
+function updBadge() {
+  const t = $('#verTag');
+  if (t) t.textContent = UPD ? `v${APP_VERSION} · 🆕 ${UPD.version}` : 'v' + APP_VERSION;
+  if (t) t.classList.toggle('hot', !!UPD);
+  const b = $('#updBtn');
+  if (b) {
+    b.classList.toggle('hot', !!UPD);
+    const tip = UPD ? `Є версія ${UPD.version} — що нового?` : 'Перевірити оновлення';
+    b.title = tip; b.setAttribute('aria-label', tip);
+  }
+  updStatus(UPD ? `Є версія ${UPD.version} — натисни 🔄 у шапці` : `Версія ${APP_VERSION}`);
+}
+const updCalm = () => !S.track && !S.navOpen && $('#modal').classList.contains('hidden');
+async function fetchRemoteVersion() {
   try {
-    const r = await fetch('app.js?t=' + Date.now(), { cache: 'no-store' });
-    const m = (await r.text()).match(/APP_VERSION\s*=\s*'([^']+)'/);
-    remote = m && m[1];
-  } catch (e) { /* немає звʼязку */ }
-  if (!remote) { sub.textContent = `Версія ${APP_VERSION} · не вдалося перевірити`; toast('Не вдалося перевірити оновлення', 'warn'); done(); return; }
-  if (remote === APP_VERSION) { sub.textContent = `Версія ${APP_VERSION} — остання ✓`; toast('У тебе остання версія ✓', 'good'); done(); return; }
-  sub.textContent = `Є версія ${remote} — оновлюю…`;
-  toast(`⬇️ Оновлення ${remote} — перезапускаю…`, 'good');
+    const r = await fetch('version.json?t=' + Date.now(), { cache: 'no-store' });
+    if (r.ok) {
+      const j = await r.json();
+      if (j && j.version) return { version: String(j.version), changes: Array.isArray(j.changes) ? j.changes.slice(0, 8) : [] };
+    }
+  } catch (e) { /* немає version.json - дивимось у сам app.js */ }
+  const r = await fetch('app.js?t=' + Date.now(), { cache: 'no-store' });
+  const m = (await r.text()).match(/APP_VERSION\s*=\s*'([^']+)'/);
+  return m ? { version: m[1], changes: [] } : null;
+}
+async function checkUpdate(manual) {
+  manual = manual === true;
+  if (manual && UPD) { askUpdate(); return; }
+  if (updBusy) return;
+  if (NATIVE) { if (manual) await checkApkUpdate({ set textContent(t) { updStatus(t); } }); return; }
+  if (location.protocol === 'file:') return;
+  if (!navigator.onLine) { if (manual) { updStatus(`Версія ${APP_VERSION} · немає інтернету`); toast('Немає інтернету — оновлення потребує звʼязку', 'warn'); } return; }
+  updBusy = true;
+  const btn = $('#updBtn');
+  if (btn && manual) { btn.disabled = true; btn.classList.add('busy'); }   // іконку не чіпаємо, лише крутимо
+  if (manual) updStatus('Перевіряю…');
+  try {
+    const rv = await fetchRemoteVersion();
+    if (!rv) throw new Error('no version');
+    UPD = vNewer(rv.version, APP_VERSION) ? rv : null;
+    updBadge();
+    if (!UPD) { if (manual) { updStatus(`Версія ${APP_VERSION} — остання ✓`); toast('У тебе остання версія ✓', 'good'); } }
+    else if (manual || (updCalm() && updAsked !== UPD.version)) askUpdate();
+  } catch (e) {
+    if (manual) { updStatus(`Версія ${APP_VERSION} · не вдалося перевірити`); toast('Не вдалося перевірити оновлення', 'warn'); }
+  }
+  updBusy = false;
+  if (btn) { btn.disabled = false; btn.classList.remove('busy'); }
+}
+/** Запис чи ведення скінчились - якщо чекає оновлення, спитати трохи згодом. */
+function updAskLater() {
+  setTimeout(() => { if (typeof UPD !== 'undefined' && UPD && updAsked !== UPD.version && updCalm()) askUpdate(); }, 1500);
+}
+async function askUpdate() {
+  if (!UPD) return;
+  updAsked = UPD.version;
+  const list = UPD.changes.length ? UPD.changes.map((c) => `• ${esc(c)}`).join('<br>') : 'опису змін немає.';
+  const busy = S.track ? '<p class="um-warn">Зараз іде запис треку — після оновлення він продовжиться сам.</p>' : '';
+  const go = await modal({
+    title: `🆕 Нова версія ${UPD.version}`,
+    html: `<div class="um"><b class="um-h">Що змінилось:</b><div class="um-list">${list}</div>${busy}`
+      + `<p class="um-cur">Зараз у тебе ${esc(APP_VERSION)}. Точки, треки й завантажені карти збережуться.</p></div>`,
+    ok: '🔄 Оновити', cancel: 'Пізніше', validate: () => true,
+  });
+  if (go) doUpdate(); else toast('Добре, спитаю наступного разу');
+}
+async function doUpdate() {
+  const to = UPD ? UPD.version : 'нової версії';
+  updStatus(`Оновлюю до ${to}…`);
+  toast(`⬇️ Оновлюю до ${to}…`, 'good');
+  LS.set('updFrom', APP_VERSION);
   try {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k !== TILE_CACHE).map((k) => caches.delete(k))); // карти лишаємо
-    const reg = await navigator.serviceWorker.getRegistration();
-    if (reg) await reg.update();
+    await Promise.all(keys.filter((k) => k !== TILE_CACHE).map((k) => caches.delete(k)));   // карти лишаємо
+    const regs = await navigator.serviceWorker.getRegistrations();
+    await Promise.all(regs.map((r) => r.unregister()));
   } catch (e) { /* */ }
-  setTimeout(() => location.reload(), 1000);
+  setTimeout(() => location.replace(location.pathname + '?v=' + encodeURIComponent(UPD ? UPD.version : Date.now())), 600);
 }
+{ // щойно оновились - сказати й прибрати ?v= з адреси
+  const from = LS.get('updFrom', '');
+  if (from) { LS.set('updFrom', ''); if (from !== APP_VERSION) setTimeout(() => toast(`✅ Оновлено: ${from} → ${APP_VERSION}`, 'good'), 900); }
+  if (/[?&]v=/.test(location.search)) try { history.replaceState(null, '', location.pathname + location.hash); } catch (e) { /* */ }
+}
+const _ub = $('#updateBtn'); if (_ub) _ub.onclick = () => checkUpdate(true);
+$('#updBtn').onclick = (e) => { e.stopPropagation(); checkUpdate(true); };
+{ const v = $('#updVer'); if (v) v.textContent = `WayBack v${APP_VERSION}`; }
+updBadge();
+setTimeout(() => checkUpdate(false), 3000);
+setInterval(() => checkUpdate(false), 30 * 60 * 1000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(false); });
 
 /* ---------- підказка для новачка ---------- */
 function syncHelp() {
