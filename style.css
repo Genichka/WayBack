@@ -204,7 +204,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .sheet { position: fixed; inset: 0; z-index: 1000; }
 .sheet-bg { position: absolute; inset: 0; background: rgba(0,0,0,.5); }
 .sheet-body {
-  position: absolute; left: 0; right: 0; bottom: 0; max-height: 88dvh; overflow-y: auto;
+  /* однакова висота для всіх вкладок і для архіву: вікно не «стрибає», довге прокручується всередині */
+  position: absolute; left: 0; right: 0; bottom: 0; height: 88vh; height: 88dvh; overflow-y: auto;
   background: var(--bg); border-top: 1px solid var(--border2); border-radius: 10px 10px 0 0;
   padding: 0 12px calc(16px + env(safe-area-inset-bottom)); max-width: 640px; margin: 0 auto;
 }

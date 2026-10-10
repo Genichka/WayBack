@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.22.0';
+const APP_VERSION = '1.22.1';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -2238,6 +2238,7 @@ function showTab(tab) {
   if (tab === 'points') renderPointList();
   if (tab === 'map') renderMapTab();
   if (tab === 'settings') renderSettings();
+  const body = $('#sheet .sheet-body'); if (body) body.scrollTop = 0;   // нова вкладка - з початку
 }
 $('#tabs').onclick = (e) => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); };
 $('#sheet').onclick = (e) => { if (e.target.closest('[data-close]')) closeSheet(); };
