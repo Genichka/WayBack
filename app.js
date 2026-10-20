@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.24.1';
+const APP_VERSION = '1.24.2';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -1103,8 +1103,20 @@ function buildTrackPath() {
   const back = pts.slice(0, at.i + 1).reverse();
   let path = [at.pt, ...back];
   if (t) path.push([t.lat, t.lon]);
+  // У місті трек годиться, лише якщо він суцільний аж до цілі. Пропуск у записі
+  // (GPS не писав) або трек, що закінчується далеко від цілі, дав би пряму крізь
+  // квартали - краще тоді без лінії, зі стрілкою й відстанню.
+  if (!straightOk() && trackBroken(tr.pts.slice(0, at.i + 1), path)) return null;
   path = thin(path, 4);
   return path.length > 1 ? path : null;
+}
+
+/** Чи є в шляху треком розрив: пропуск у записі або стрибок понад TRACK_JUMP. */
+const TRACK_JUMP = 250;
+function trackBroken(raw, path) {
+  for (let i = 1; i < raw.length; i++) if (isGap(raw[i - 1], raw[i])) return true;
+  for (let i = 1; i < path.length; i++) if (dist(path[i - 1], path[i]) > TRACK_JUMP) return true;
+  return false;
 }
 
 /* ---- маршрут дорогами ---- */
@@ -1130,8 +1142,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function httpGet(url, ms) {
   const ctl = new AbortController();
   routeAbort = ctl;
-  const timer = setTimeout(() => ctl.abort(), ms);
+  // тайм-аут теж обриває запит, але це не «перебив новий запит»: тоді треба
+  // питати інший двигун, а не мовчки здаватись
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; ctl.abort(); }, ms);
   try { return await fetch(url, { signal: ctl.signal }); }
+  catch (e) { if (timedOut) throw Object.assign(new Error('timeout'), { name: 'TimeoutError' }); throw e; }
   finally { clearTimeout(timer); if (routeAbort === ctl) routeAbort = null; }
 }
 /** Зайнятий чи зламаний сервер - має сенс спробувати ще раз. */
@@ -1413,9 +1429,19 @@ async function requestRoute(force) {
     drawReturn();
   } catch (e) {
     if (e && e.name === 'AbortError') { S.rErr = 'перервано'; return; }
-    S.rErr = 'немає дороги';
+    S.rErr = routeErrText(e);
     applyFallback('Не вийшло прокласти дорогами');
   } finally { S.rBusy = false; updateAll(); }
+}
+
+/** Людською мовою, чому сервер маршрутів не дав дороги. */
+function routeErrText(e) {
+  if (!e) return 'немає дороги';
+  if (e.busy) return 'сервер маршрутів зайнятий';
+  if (e.name === 'TimeoutError' || /timeout|час/i.test(e.message || '')) return 'сервер маршрутів не відповів вчасно';
+  if (e.name === 'TypeError') return 'сервер маршрутів недоступний';
+  if (/не схоже/.test(e.message || '')) return 'сервер дав маршрут, коротший за пряму';
+  return 'дороги між точками не знайдено';
 }
 
 /** Чи доречна пряма замість дороги. У місті - ні: вона йде крізь будинки.
@@ -1510,7 +1536,8 @@ function refreshReturn() {
     return;
   }
   if (m === 'route') {
-    if (!S.rpath) { requestRoute(false); return; }
+    // немає лінії або веде запасний трек - пробуємо дорогу знову (не частіше ніж раз на 20 с)
+    if (!S.rpath || S.rsrc !== 'route') { requestRoute(false); return; }
     const at = nearestOnPath(S.rpath, [S.pos.lat, S.pos.lon]);
     if (at.d > 60) requestRoute(false);   // збився з маршруту - перерахувати
   }
@@ -1722,8 +1749,12 @@ function renderNav() {
       if (S.rSnap > 120) s += `. Найближча дорога за ${Math.round(S.rSnap)} м — до неї йди за стрілкою.`;
       else s += '.';
       info.textContent = s;
-    } else if (S.rpath) info.textContent = 'Веду назад твоїм же слідом.';
-    else if (S.noLine) info.innerHTML = '<b style="color:var(--orange)">Дороги не знайшлось</b> — лінію не малюю, щоб не вести крізь будинки. Іди за стрілкою й відстанню, або обери «Пряма».';
+    } else if (S.rpath) {
+      info.textContent = (m === 'route' && S.rErr && S.rErr !== 'перервано')
+        ? `Дорогами не вийшло: ${S.rErr}. Поки веду твоїм слідом, дорогу пробую знову.`
+        : 'Веду назад твоїм же слідом.';
+    }
+    else if (S.noLine) info.innerHTML = `<b style="color:var(--orange)">Дорогами не вийшло</b>${S.rErr && S.rErr !== 'перервано' ? ': ' + esc(S.rErr) : ''}. Лінію не малюю, щоб не вести крізь будинки — іди за стрілкою й відстанню, або обери «Пряма». Дорогу пробую знову.`;
     else info.textContent = m === 'track' ? 'Немає записаного треку — веду по прямій.' : 'Маршрут недоступний — веду по прямій.';
   }
   if (hasH) {
