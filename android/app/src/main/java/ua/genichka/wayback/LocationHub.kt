@@ -84,6 +84,7 @@ object LocationHub {
         else if (now - lastGpsAt < 10_000) return
         last = loc
         TripStore.onLocation(loc)
+        PhoneTrack.onLocation(loc)
         for (l in listeners) l(loc)
     }
 }

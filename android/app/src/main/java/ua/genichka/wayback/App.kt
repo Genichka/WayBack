@@ -7,6 +7,7 @@ object App {
     fun init(ctx: Context) {
         TileStore.init(ctx)
         TripStore.init(ctx)
+        PhoneTrack.init(ctx)
         WebState.init(ctx)
     }
 }

@@ -30,6 +30,17 @@ class Bridge(private val act: MainActivity) {
     @JavascriptInterface
     fun carRecording(): Boolean = TripStore.isRecording
 
+    /** Запис сліду з телефона у фоні: GPS пише Android, навіть коли екран вимкнено. */
+    @JavascriptInterface
+    fun recStart(id: String, minStep: Double, maxAcc: Double): Boolean = PhoneTrack.start(act, id, minStep, maxAcc)
+
+    @JavascriptInterface
+    fun recStop() = PhoneTrack.stop(act)
+
+    /** Точки треку [id] починаючи з номера [from]: {"id","n","rec","pts":[[lat,lon,t,acc,alt],…]} */
+    @JavascriptInterface
+    fun recPts(id: String, from: Int): String = PhoneTrack.json(id, from)
+
     @JavascriptInterface
     fun keepScreen(on: Boolean) {
         act.runOnUiThread {

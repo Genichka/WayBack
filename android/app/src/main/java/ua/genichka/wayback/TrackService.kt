@@ -11,8 +11,8 @@ import android.content.pm.ServiceInfo
 import android.os.IBinder
 
 /**
- * Служба переднього плану: не дає системі приспати GPS, поки пишеться трек у машині
- * (навіть коли на екрані авто відкрита інша програма, напр. музика).
+ * Служба переднього плану: не дає системі приспати GPS, поки пишеться трек —
+ * у машині (Android Auto) або з телефона пішки, з вимкненим екраном у кишені.
  */
 class TrackService : Service() {
 
@@ -29,7 +29,11 @@ class TrackService : Service() {
         }
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int = START_NOT_STICKY
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // підпис міг змінитись: почали писати ще й з телефона
+        try { getSystemService(NotificationManager::class.java).notify(NOTIF_ID, notification()) } catch (e: Exception) { /* */ }
+        return START_NOT_STICKY
+    }
 
     override fun onDestroy() {
         LocationHub.release("service")
@@ -48,7 +52,7 @@ class TrackService : Service() {
         return Notification.Builder(this, CHANNEL)
             .setSmallIcon(R.drawable.ic_stat)
             .setContentTitle("WayBack")
-            .setContentText("Пишу трек у машині")
+            .setContentText(if (PhoneTrack.isRecording) "Пишу слід — можна вимкнути екран" else "Пишу трек у машині")
             .setContentIntent(open)
             .setOngoing(true)
             .build()
@@ -68,7 +72,9 @@ class TrackService : Service() {
             }
         }
 
+        /** Зупинити, якщо ніхто більше не пише (телефон і машина можуть писати одночасно). */
         fun stop(ctx: Context) {
+            if (TripStore.isRecording || PhoneTrack.isRecording) return
             try { ctx.stopService(Intent(ctx, TrackService::class.java)) } catch (e: Exception) { /* */ }
         }
     }
