@@ -10,7 +10,7 @@ const SHELL = [
   'leaflet.js', 'leaflet.css', 'qr.js',
 ];
 const OPTIONAL = ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png'];
-const TILE_HOSTS = /(^|\.)(tile\.openstreetmap\.org|tile\.opentopomap\.org|arcgisonline\.com)$/;
+const TILE_HOSTS = /(^|\.)(tile\.openstreetmap\.org|tile\.opentopomap\.org|tile-cyclosm\.openstreetmap\.fr|arcgisonline\.com)$/;
 const tileKey = (url) => url.replace(/^https:\/\/[a-d]\./, 'https://').replace(/\?.*$/, '');
 const fresh = (u) => new Request(u, { cache: 'reload' });
 

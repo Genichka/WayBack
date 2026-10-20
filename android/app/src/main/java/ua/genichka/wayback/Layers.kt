@@ -19,6 +19,12 @@ object Layers {
         Layer("sat", "Супутник",
             "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "", 18,
             "© Esri, Maxar, Earthstar Geographics"),
+        Layer("detail", "Деталь", "https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png", "abc", 20,
+            "© OpenStreetMap | CyclOSM"),
+        // в авто «Гібрид» показуємо як супутник: підписи поверх MapRenderer не накладає
+        Layer("hybrid", "Гібрид",
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", "", 18,
+            "© Esri, Maxar, Earthstar Geographics"),
         Layer("dark", "Темна",
             "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", "", 16,
             "© Esri, HERE, Garmin, © OpenStreetMap"),
@@ -37,7 +43,7 @@ object Layers {
             .replace("{x}", x.toString()).replace("{y}", y.toString())
     }
 
-    private val TILE_HOSTS = Regex("(^|\\.)(tile\\.openstreetmap\\.org|tile\\.opentopomap\\.org|arcgisonline\\.com)$")
+    private val TILE_HOSTS = Regex("(^|\\.)(tile\\.openstreetmap\\.org|tile\\.opentopomap\\.org|tile-cyclosm\\.openstreetmap\\.fr|arcgisonline\\.com)$")
     fun isTileHost(host: String?): Boolean = host != null && TILE_HOSTS.containsMatchIn(host)
 
     private val SUBDOMAIN = Regex("^https://[a-d]\\.")

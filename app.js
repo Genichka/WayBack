@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.24.2';
+const APP_VERSION = '1.25.0';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -50,6 +50,16 @@ const LAYERS = {
     attr: '© <a href="https://www.openstreetmap.org/copyright">OSM</a>, SRTM | © <a href="https://opentopomap.org">OpenTopoMap</a>' },
   sat: { name: 'Супутник', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', max: 18, dl: true,
     attr: '© Esri, Maxar, Earthstar Geographics' },
+  // Найдрібніша деталізація: стежки, ґрунтовки з покриттям, просіки, струмки, лавки,
+  // джерела - аж до масштабу 20. Сервер OSM France, тож наперед не качаємо (як і «Схему»),
+  // але все переглянуте кешується.
+  detail: { name: 'Деталь', url: 'https://{s}.tile-cyclosm.openstreetmap.fr/cyclosm/{z}/{x}/{y}.png', sub: 'abc', max: 20, dl: false,
+    attr: '© <a href="https://www.openstreetmap.org/copyright">OSM</a> | <a href="https://www.cyclosm.org">CyclOSM</a>' },
+  // Супутник + дороги й назви поверх - видно і ліс, і куди веде дорога. Качається в офлайн.
+  hybrid: { name: 'Гібрид', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', max: 18, dl: true,
+    over: ['https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Transportation/MapServer/tile/{z}/{y}/{x}',
+           'https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}'],
+    attr: '© Esri, Maxar, Earthstar Geographics, HERE, Garmin' },
   dark: { name: 'Темна', url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}', max: 16, dl: true,
     attr: '© Esri, HERE, Garmin, © <a href="https://www.openstreetmap.org/copyright">OSM</a>' },
 };
@@ -105,7 +115,7 @@ const S = {
 (() => {
   const near = (v, list) => list.reduce((a, b) => (Math.abs(b - v) < Math.abs(a - v) ? b : a));
   S.settings.radius = near(+S.settings.radius || 3, [1, 3, 10]);
-  S.settings.zmax = near(+S.settings.zmax || 16, [16, 17]);
+  S.settings.zmax = near(+S.settings.zmax || 16, [16, 17, 18]);
 })();
 const saveSettings = () => LS.set('settings', S.settings);
 const savePoints = () => { LS.set('points', S.points); LS.set('target', S.targetId); };
@@ -202,8 +212,8 @@ applyTheme();
 
 /* ---------- map ---------- */
 const view = LS.get('view', { c: [49.0, 31.3], z: 6 });
-const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 19, preferCanvas: true, fadeAnimation: true }).setView(view.c, view.z);
-let baseLayer = null;
+const map = L.map('map', { zoomControl: false, attributionControl: true, maxZoom: 20, preferCanvas: true, fadeAnimation: true }).setView(view.c, view.z);
+let baseLayer = null, overLayers = [];
 
 /* Шар плиток з повторами і запасним показом: якщо плитка не прийшла — ще 3 спроби
    (з іншим піддоменом), далі показуємо збільшену плитку з меншого масштабу (з кешу/мережі).
@@ -252,10 +262,16 @@ const FastTiles = L.TileLayer.extend({
 function setLayer(id) {
   const l = LAYERS[id] || LAYERS.osm;
   if (baseLayer) map.removeLayer(baseLayer);
+  overLayers.forEach((o) => map.removeLayer(o)); overLayers = [];
   baseLayer = new FastTiles(l.url, {
-    subdomains: l.sub || 'abc', maxNativeZoom: l.max, maxZoom: 19, attribution: l.attr,
+    subdomains: l.sub || 'abc', maxNativeZoom: l.max, maxZoom: 20, attribution: l.attr,
     keepBuffer: 4, updateWhenZooming: false, updateWhenIdle: false,
   }).addTo(map);
+  // підписи й дороги поверх (у «Гібриді») - прозорі плитки над основою
+  for (const u of l.over || []) {
+    overLayers.push(new FastTiles(u, { subdomains: 'abc', maxNativeZoom: l.max, maxZoom: 20, zIndex: 2,
+      keepBuffer: 4, updateWhenZooming: false, updateWhenIdle: false }).addTo(map));
+  }
   S.settings.layer = id; saveSettings();
   if (typeof styleHistLine === 'function') try { styleHistLine(); } catch (e) { /* лінії ще не створені */ }
 }
@@ -287,7 +303,7 @@ const histLine  = L.polyline([], { color: '#ff2a2a', weight: 4.5, opacity: 1, li
 const histGap   = L.polyline([], { color: '#ff2a2a', weight: 2, opacity: .75, dashArray: '4 7', interactive: false, lineCap: 'round' }).addTo(map);
 { const set = histLine.setLatLngs.bind(histLine); histLine.setLatLngs = (ll) => { histCase.setLatLngs(ll); return set(ll); }; }
 function styleHistLine() {
-  const light = ['osm', 'topo'].includes(S.settings.layer), z = map.getZoom();
+  const light = ['osm', 'topo', 'detail'].includes(S.settings.layer), z = map.getZoom();
   map.getPane('histPane').classList.toggle('blend', light);
   // ближче - тонше, щоб лінія не перекривала півкварталу
   const w = z >= 18 ? 3 : z >= 16 ? 3.6 : 4.5;
@@ -2217,7 +2233,7 @@ function tileList(lat, lon, rKm, zmin, zmax) {
   }
   return out;
 }
-function tileUrl(l, z, x, y) { return l.url.replace('{s}', (l.sub || 'a')[0]).replace('{z}', z).replace('{x}', x).replace('{y}', y); }
+function tileUrl(l, z, x, y, u) { return (u || l.url).replace('{s}', (l.sub || 'a')[0]).replace('{z}', z).replace('{x}', x).replace('{y}', y); }
 const MAX_TILES = 25000;
 function dlPlan() {
   const l = LAYERS[S.settings.layer], c = map.getCenter();
@@ -2229,13 +2245,13 @@ function updateDlInfo() {
   const { l, list, zmax } = dlPlan();
   const btn = $('#dlBtn');
   if (!l.dl) {
-    $('#dlInfo').innerHTML = `Шар «${l.name}» не можна завантажувати наперед — так вимагає OpenStreetMap.` +
-      ` Для офлайну підходить «Топо».<br><button class="btn primary mini" id="toTopo">Перемкнути на «Топо»</button>`;
+    $('#dlInfo').innerHTML = `Шар «${l.name}» не можна завантажувати наперед — так вимагають сервери OpenStreetMap (переглянуте все одно зберігається).` +
+      ` Для офлайну підходять «Топо», «Супутник» і «Гібрид».<br><button class="btn primary mini" id="toTopo">Перемкнути на «Топо»</button>`;
     const t = $('#toTopo');
     if (t) t.onclick = () => { setLayer('topo'); renderMapTab(); toast('🗺️ Шар «Топо» — тепер можна завантажити', 'good'); };
     btn.disabled = true; return;
   }
-  const perTile = S.settings.layer === 'sat' ? 22 : 14; // приблизно, КБ
+  const perTile = (l.url.includes('World_Imagery') ? 22 : 14) + (l.over || []).length * 5; // приблизно, КБ
   const mb = list.length * perTile / 1024;
   const mins = Math.ceil(list.length / 6 / 60); // ~6 плиток/с
   const size = mb < 1000 ? `${mb.toFixed(mb < 10 ? 1 : 0)} МБ` : `${(mb / 1024).toFixed(1)} ГБ`;
@@ -2260,7 +2276,8 @@ async function downloadArea() {
   const worker = async () => {
     while (i < list.length && !dlState.cancel) {
       const [z, x, y] = list[i++];
-      const url = tileUrl(l, z, x, y), key = tileKey(url);
+      for (const u of [l.url, ...(l.over || [])]) {
+      const url = tileUrl(l, z, x, y, u), key = tileKey(url);
       try {
         if (NATIVE) {
           // у додатку плитки зберігає сам Android (їх бачить і Android Auto)
@@ -2272,6 +2289,7 @@ async function downloadArea() {
           if (r.ok) await cache.put(key, r); else fail++;
         }
       } catch (e) { fail++; }
+      }
       done++;
       if (done % 5 === 0 || done === list.length) {
         bar.style.width = (done / list.length * 100).toFixed(1) + '%';
@@ -2311,7 +2329,7 @@ function seg(el, items, cur, onPick) {
 }
 function renderMapTab() {
   seg($('#radiusSeg'), [[1, '1 км'], [3, '3 км'], [10, '10 км']], S.settings.radius, (v) => { S.settings.radius = +v; saveSettings(); updateDlInfo(); });
-  seg($('#zoomSeg'), [[16, 'Звичайно'], [17, 'Детально']], S.settings.zmax, (v) => { S.settings.zmax = +v; saveSettings(); updateDlInfo(); });
+  seg($('#zoomSeg'), [[16, 'Звичайно'], [17, 'Детально'], [18, 'Максимум']], S.settings.zmax, (v) => { S.settings.zmax = +v; saveSettings(); updateDlInfo(); });
   updateDlInfo(); updateCacheSize();
 }
 $('#shareBtn').onclick = shareHere;
