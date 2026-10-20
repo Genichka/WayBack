@@ -1,8 +1,12 @@
 package ua.genichka.wayback
 
 import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Environment
+import android.os.PowerManager
+import android.provider.Settings
 import android.provider.MediaStore
 import android.view.WindowManager
 import android.webkit.JavascriptInterface
@@ -36,6 +40,39 @@ class Bridge(private val act: MainActivity) {
 
     @JavascriptInterface
     fun recStop() = PhoneTrack.stop(act)
+
+    /** Чи ввімкнений GPS на телефоні. */
+    @JavascriptInterface
+    fun gpsOn(): Boolean = LocationHub.gpsOn(act)
+
+    @JavascriptInterface
+    fun openGpsSettings() {
+        act.runOnUiThread {
+            try { act.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } catch (e: Exception) { /* */ }
+        }
+    }
+
+    /** true — система не обмежує WayBack у фоні (оптимізацію батареї вимкнено). */
+    @JavascriptInterface
+    fun batteryFree(): Boolean = try {
+        (act.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(act.packageName)
+    } catch (e: Exception) { true }
+
+    /** Попросити систему не обмежувати WayBack у фоні; не вийшло — відкрити налаштування додатка. */
+    @JavascriptInterface
+    fun openBatterySettings() {
+        act.runOnUiThread {
+            val pkg = Uri.parse("package:" + act.packageName)
+            val tries = listOf(
+                Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, pkg),
+                Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS),
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg),
+            )
+            for (i in tries) {
+                try { act.startActivity(i); break } catch (e: Exception) { /* наступний */ }
+            }
+        }
+    }
 
     /** Точки треку [id] починаючи з номера [from]: {"id","n","rec","pts":[[lat,lon,t,acc,alt],…]} */
     @JavascriptInterface

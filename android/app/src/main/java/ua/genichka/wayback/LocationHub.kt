@@ -30,6 +30,12 @@ object LocationHub {
         ctx.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED ||
             ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+    /** Чи ввімкнене місцезнаходження на телефоні (шторка «Геодані»). */
+    fun gpsOn(ctx: Context): Boolean = try {
+        val m = ctx.applicationContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        m.isLocationEnabled && m.isProviderEnabled(LocationManager.GPS_PROVIDER)
+    } catch (e: Exception) { true }
+
     fun addListener(l: (Location) -> Unit) { listeners.add(l) }
     fun removeListener(l: (Location) -> Unit) { listeners.remove(l) }
 
@@ -57,11 +63,15 @@ object LocationHub {
                     runCatching { m.getLastKnownLocation(LocationManager.NETWORK_PROVIDER) }.getOrNull(),
                 ).maxByOrNull { it.time }
             }
-            if (m.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+            // Підписуємось, навіть якщо GPS зараз вимкнений: щойно людина його ввімкне,
+            // точки підуть самі (раніше підписка робилась лише на ввімкнений GPS, і запис
+            // лишався порожнім до перезапуску).
+            val all = m.allProviders
+            if (LocationManager.GPS_PROVIDER in all) {
                 m.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, callback, Looper.getMainLooper())
             }
-            if (m.isProviderEnabled(LocationManager.NETWORK_PROVIDER)) {
-                m.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, callback, Looper.getMainLooper())
+            if (LocationManager.NETWORK_PROVIDER in all) {
+                runCatching { m.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 0f, callback, Looper.getMainLooper()) }
             }
         } catch (e: Exception) {
             holders.remove(who)

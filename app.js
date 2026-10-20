@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.24.0';
+const APP_VERSION = '1.24.1';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -349,6 +349,7 @@ function kalman(lat, lon, acc, t, speed) {
 }
 function onPos(p) {
   const c = p.coords, t = p.timestamp || Date.now();
+  if (!NATIVE) watchGpsSwitch(true);
   const [flat, flon] = kalman(c.latitude, c.longitude, c.accuracy, t, c.speed);
   S.pos = { lat: flat, lon: flon, raw: [c.latitude, c.longitude], acc: c.accuracy, alt: c.altitude, t, speed: c.speed, heading: c.heading };
   const ll = [flat, flon];
@@ -377,7 +378,10 @@ function onPosErr(e) {
     S.gpsDenied = true; S.pendingStart = false; updateTrackBtn();
     gpsBadge('bad', 'Немає доступу');
     if (!gpsHelpShown) { gpsHelpShown = true; gpsHelp(); }
-  } else gpsBadge('bad', e.code === 2 ? 'Увімкни GPS' : 'Шукаю…');
+  } else {
+    gpsBadge('bad', e.code === 2 ? 'Увімкни GPS' : 'Шукаю…');
+    if (e.code === 2 && !NATIVE) watchGpsSwitch(false);
+  }
 }
 function startGps() {
   if (!('geolocation' in navigator)) { gpsBadge('bad', 'Немає GPS'); return; }
@@ -602,6 +606,58 @@ function startTrack(silent) {
   wake(true); if (!silent) vibrate(40);
   updateTrackBtn(); updateAll();
 }
+
+/* ---------- GPS і батарея: попередити до того, як слід вийде порожнім ---------- */
+const nGpsOn = () => { try { return !NATIVE || typeof WayBackNative.gpsOn !== 'function' || WayBackNative.gpsOn(); } catch (e) { return true; } };
+const nBattFree = () => { try { return !NATIVE || typeof WayBackNative.batteryFree !== 'function' || WayBackNative.batteryFree(); } catch (e) { return true; } };
+async function askGpsOn() {
+  vibrate([200, 100, 200]);
+  const go = await modal({
+    title: '📍 GPS вимкнений',
+    html: `<div class="note" style="font-size:13px;color:var(--text);line-height:1.5">Без GPS слід не пишеться і повернути до точки не вийде.<br><br>
+      Увімкни <b>«Місцезнаходження»</b> у шторці зверху або кнопкою нижче. Запис почнеться сам, щойно зʼявиться сигнал.</div>`,
+    ok: NATIVE ? 'Відкрити налаштування' : 'Зрозуміло', cancel: 'Скасувати', validate: () => true,
+  });
+  if (go && NATIVE) { try { WayBackNative.openGpsSettings(); } catch (e) { /* */ } }
+  return !!go;
+}
+async function askBattery() {
+  if (nBattFree() || S.battAsked) return;
+  S.battAsked = true;                                  // раз за сеанс, щоб не набридати
+  const go = await modal({
+    title: '🔋 Дозволь WayBack працювати у фоні',
+    html: `<div class="note" style="font-size:13px;color:var(--text);line-height:1.5">Зараз телефон економить батарею на WayBack і може приспати запис, коли екран вимкнено, — тоді в сліді будуть пропуски.<br><br>
+      Натисни <b>«Дозволити»</b> і вибери <b>«Дозволити»</b> / <b>«Без обмежень»</b>.<br>
+      Samsung: Налаштування → Додатки → WayBack → Батарея → <b>«Без обмежень»</b>.</div>`,
+    ok: 'Дозволити', cancel: 'Не зараз', validate: () => true,
+  });
+  if (go) { try { WayBackNative.openBatterySettings(); } catch (e) { /* */ } }
+}
+/** «Старт» з кнопки: спершу перевірити GPS, потім почати, потім - батарею. */
+async function startTrackUi() {
+  if (!S.gpsDenied && (!nGpsOn() || S.gpsOff)) {
+    const go = await askGpsOn();
+    if (!go) return;
+    S.pendingStart = true; updateTrackBtn(); toast('Чекаю сигнал GPS…');
+    return;
+  }
+  startTrack();
+  if (S.track || S.pendingStart) askBattery();
+}
+/* GPS вимкнули посеред запису чи ведення - вібрація і попередження, увімкнули - підтвердження. */
+let gpsWasOn = true;
+function watchGpsSwitch(on) {
+  if (on === gpsWasOn) return;
+  gpsWasOn = on;
+  S.gpsOff = !on;
+  if (!(S.track || S.navOpen || S.pendingStart)) return;
+  if (!on) {
+    vibrate([400, 150, 400, 150, 400]);
+    toast('⚠️ GPS вимкнено — слід не пишеться! Увімкни місцезнаходження', 'warn');
+    if ($('#modal').classList.contains('hidden')) askGpsOn();
+  } else toast('📍 GPS знову працює', 'good');
+}
+setInterval(() => { if (NATIVE) watchGpsSwitch(nGpsOn()); }, 3000);
 
 /** Слід має писатись сам, інакше вертатись не буде по чому.
  *  Вмикається з першим надійним сигналом GPS. */
@@ -1394,7 +1450,8 @@ function drawReturn() {
     if (!S.navOpen) { guideLine.setLatLngs([]); guideCase.setLatLngs([]); }
   }
   drawChevrons();
-  if (S.navOpen && S.follow) navFrame();       // зʼявився або змінився шлях - підлаштувати кадр
+  if (S.navOpen && inOverview() && S.rpath && !S.rOverDone) { S.rOverDone = true; routeOverview(overviewUntil === Infinity ? 0 : Math.max(2500, overviewUntil - Date.now())); }
+  else if (S.navOpen && S.follow) navFrame();       // зʼявився або змінився шлях - підлаштувати кадр
 }
 
 function drawChevrons() {
@@ -1761,8 +1818,40 @@ function wantBearing() {
   if (S.navBearing != null) return S.navBearing;
   return ((ROT.b % 360) + 360) % 360;
 }
+/* Огляд маршруту: весь шлях від тебе до цілі в одному кадрі, північ угорі.
+   Показується кілька секунд щойно натиснув «Назад», а також кнопкою ⤢ - доки
+   не натиснеш ◎. Поки огляд, ведення кадр не чіпає. */
+let overviewUntil = 0, overviewT = null;
+const inOverview = () => Date.now() < overviewUntil;
+function routeOverview(ms) {
+  const t = target();
+  if (!t) return;
+  const ll = [[t.lat, t.lon]];
+  if (S.pos) ll.push([S.pos.lat, S.pos.lon]);
+  (S.rpath || []).forEach((p) => ll.push([p[0], p[1]]));
+  overviewUntil = ms ? Date.now() + ms : Infinity;
+  clearTimeout(overviewT);
+  if (ms) overviewT = setTimeout(() => { overviewUntil = 0; if (S.navOpen && S.follow) navFrame(true); }, ms);
+  rotLayout(false); renderMapCompass();
+  const navH = S.navOpen ? ($('#nav').offsetHeight || 0) : 0;
+  try {
+    if (ll.length === 1) map.setView(ll[0], 17);
+    else map.fitBounds(L.latLngBounds(ll), { paddingTopLeft: L.point(70, 60), paddingBottomRight: L.point(70, navH + 40), maxZoom: 18, animate: true });
+  } catch (e) { /* */ }
+}
+function endOverview() { overviewUntil = 0; clearTimeout(overviewT); }
+/* Масштаб, який ти виставив пальцями, ведення не перебиває: міняємо лише центр.
+   ◎ повертає автомасштаб. */
+{
+  const mark = () => { if (S.navOpen) { S.userZoom = true; endOverview(); } };
+  const el = $('#map');
+  el.addEventListener('touchstart', (e) => { if (e.touches && e.touches.length > 1) mark(); }, { passive: true });
+  el.addEventListener('wheel', mark, { passive: true });
+  el.addEventListener('dblclick', mark);
+}
 function navFrame(force) {
   if (!S.navOpen || !S.follow || !S.pos || !target()) return;
+  if (inOverview()) return;
   const now = Date.now();
   if (!force && now - frameAt < 800) return;
   frameAt = now;
@@ -1784,7 +1873,8 @@ function navFrame(force) {
   zw = Math.max(12, Math.min(19, zw));
   const cur = map.getZoom();
   let z = cur;
-  if (force || zw < cur) { z = zw; frameZoomIn = 0; } else if (zw > cur) { if (++frameZoomIn >= 2) { z = zw; frameZoomIn = 0; } } else frameZoomIn = 0;
+  if (S.userZoom) { z = cur; frameZoomIn = 0; }
+  else if (force || zw < cur) { z = zw; frameZoomIn = 0; } else if (zw > cur) { if (++frameZoomIn >= 2) { z = zw; frameZoomIn = 0; } } else frameZoomIn = 0;
   // центр карти такий, щоб ти опинився в точці (середина, yMe) з урахуванням повороту
   const br = rad(ROT.on ? ROT.b : 0), oy = yMe - Hp / 2;
   const mx = -oy * Math.sin(br), my = oy * Math.cos(br);
@@ -1817,6 +1907,7 @@ $('#navMin').onclick = () => { S.settings.navMin = !S.settings.navMin; saveSetti
 
 function openNav() {
   if (!target()) { toast('Спочатку познач точку', 'warn'); return; }
+  S.rOverDone = false;
   S.navOpen = true; $('#nav').classList.remove('hidden'); $('#navBtn').classList.add('on');
   $('#trkCard').classList.add('hidden');
   document.body.classList.add('nav-open');
@@ -1827,12 +1918,15 @@ function openNav() {
   applyNavMin();
   renderNav(); renderCompass();
   // карта веде тебе: у кадрі ти і ціль (картка ведення вже на екрані, її висоту враховуємо)
-  if (S.pos) { setFollow(true); requestAnimationFrame(() => navFrame(true)); }
-  else if (t) map.setView([t.lat, t.lon], Math.max(map.getZoom(), 16));
+  // спершу - весь маршрут у кадрі, через 5 с карта переходить до ведення
+  S.userZoom = false;
+  setFollow(true);
+  requestAnimationFrame(() => routeOverview(5000));
 }
 function closeNav() {
   S.navOpen = false; $('#nav').classList.add('hidden'); $('#navBtn').classList.remove('on');
   document.body.classList.remove('nav-open');
+  endOverview(); S.userZoom = false;
   rotLayout(false); renderMapCompass();
   if (S.shownTrackId) $('#trkCard').classList.remove('hidden');
   updAskLater();
@@ -2600,18 +2694,21 @@ $('#markBtn').onclick = markHere;
 $('#trackBtn').onclick = () => {
   if (S.track) stopTrack();
   else if (S.pendingStart) { S.pendingStart = false; updateTrackBtn(); }
-  else startTrack();
+  else startTrackUi();
 };
 $('#navBtn').onclick = () => (S.navOpen ? closeNav() : openNav());
 $('#navClose').onclick = closeNav;
 $('#pTarget').onclick = () => (target() ? openNav() : openSheet('points'));
 $('#fabMe').onclick = () => {
+  endOverview(); S.userZoom = false;          // ◎ - назад до ведення з автомасштабом
   setFollow(true);
   if (!S.pos) { toast('Шукаю GPS…'); return; }
   if (S.navOpen && target()) navFrame(true);
   else map.setView([S.pos.lat, S.pos.lon], Math.max(map.getZoom(), 16));
 };
 $('#fabFit').onclick = () => {
+  // під час ведення ⤢ показує весь маршрут до цілі (доки не натиснеш ◎)
+  if (S.navOpen && target()) { setFollow(true); routeOverview(0); toast('Весь маршрут · ◎ — назад до ведення'); return; }
   const ll = S.points.map((p) => [p.lat, p.lon]);
   if (S.pos) ll.push([S.pos.lat, S.pos.lon]);
   if (S.track) S.track.pts.forEach((p) => ll.push([p[0], p[1]]));
