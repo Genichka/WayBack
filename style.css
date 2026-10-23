@@ -68,21 +68,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .icon-btn:disabled { opacity: .55; }
 .icon-btn.busy svg { animation: spin 1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-/* очищення - дія руйнівна, тож підсвічуємо теплим */
-
-/* швидкі перемикачі під панелями: середовище і спосіб руху.
-   Один ряд, щоб не з'їдати карту. */
-.quick { display: flex; gap: 4px; padding: 0 5px 5px; background: var(--bg); }
-.quick .qseg { flex: 1 1 0; min-width: 0; }
-.quick .qseg:first-child { flex: 1.5 1 0; }
-.qseg button {
-  padding: 5px 2px; font-size: 11px; gap: 3px; min-width: 0;
-  display: flex; align-items: center; justify-content: center;
-  white-space: nowrap; overflow: hidden;
-}
-.qseg button span { font-size: 12px; }
-@media (max-width: 370px) { .qseg button { font-size: 10px; gap: 2px; } .qseg button span { font-size: 11px; } }
-@media (max-width: 345px) { .qseg button { font-size: 9.5px; gap: 2px; padding: 5px 1px; } .qseg button span { font-size: 11px; } }
 
 /* stat panels */
 .stats { display: grid; grid-template-columns: 1.35fr 1.1fr .85fr .75fr; gap: 4px; padding: 5px; background: var(--bg); }
@@ -129,8 +114,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .rec-badge {
   position: absolute; left: 8px; top: 70px; z-index: 500; display: flex; align-items: center; gap: 5px;
-  background: var(--panel); border: 1px solid var(--red); color: var(--red); font-weight: 600; font-size: 9.5px;
-  padding: 3px 7px; border-radius: 3px; letter-spacing: .5px;
+  background: var(--panel); border: 1px solid var(--red); color: var(--red); font-weight: 600; font-size: 11px;
+  padding: 4px 8px; border-radius: 3px; letter-spacing: .5px;
 }
 .rec-badge i { width: 6px; height: 6px; border-radius: 50%; background: var(--red); animation: blink 1.2s infinite; }
 @keyframes blink { 50% { opacity: .2; } }
@@ -154,7 +139,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .pin.tgt::before { border-color: var(--green); box-shadow: 0 0 0 4px rgba(115,191,105,.3), 0 3px 8px rgba(0,0,0,.4); }
 .pin-label {
   position: absolute; top: 32px; left: 50%; transform: translateX(-50%); white-space: nowrap;
-  background: var(--panel); color: var(--text); border: 1px solid var(--border2); font-size: 10px; padding: 0 5px; border-radius: 3px;
+  background: var(--panel); color: var(--text); border: 1px solid var(--border2); font-size: 11.5px !important; padding: 0 5px; border-radius: 3px;
 }
 
 /* bottom bar */
@@ -243,7 +228,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .i-acts { display: flex; gap: 4px; flex: none; }
 .i-acts button { width: 34px; height: 34px; border: 1px solid var(--border); background: var(--panel2); border-radius: 4px; font-size: 15px; }
 .i-acts button.on { border-color: var(--green); color: var(--green); }
-.chev { color: var(--muted); font-size: 20px; }
+.chev { color: var(--muted); font-size: 20px; pointer-events: none; }
 .empty { text-align: center; color: var(--muted); padding: 22px 10px; border: 1px dashed var(--border2); border-radius: 4px; }
 
 .row-btns { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
@@ -340,7 +325,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .rmode-info { margin-top: 6px; font-size: 12px; color: var(--dim); line-height: 1.45; min-height: 17px; }
 
 /* ---- шеврони напрямку вздовж маршруту ---- */
-.chev { pointer-events: none; }
 .chev i {
   display: block; width: 12px; height: 12px;
   background: #fff; opacity: .9;
@@ -380,7 +364,6 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 
 /* ---- вихід ---- */
-#exitBtn { font-size: 17px; }
 
 
 /* ---- пошук місця ---- */
@@ -425,7 +408,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .map-cmp .mc-l { fill: var(--strong); font-size: 15px; font-weight: 700; text-anchor: middle; dominant-baseline: middle; }
 .map-cmp .mc-hub { fill: var(--panel); stroke: var(--strong); stroke-width: 2; }
 .map-cmp #mcRose { transition: transform .25s linear; }
-.map-cmp .mc-deg { font-size: 9.5px; font-weight: 600; line-height: 1.1; white-space: nowrap; }
+.map-cmp .mc-deg { font-size: 10.5px; font-weight: 600; line-height: 1.1; white-space: nowrap; }
 .map-cmp.off svg { opacity: .45; }
 .map-cmp.off .mc-deg { color: var(--muted); font-weight: 400; }
 .map-cmp:active { transform: scale(.95); }
@@ -465,24 +448,9 @@ body.nav-open .toast { bottom: calc(var(--navh, 300px) + 70px + env(safe-area-in
 /* під час ведення є великий компас у картці - малий на карті ховаємо */
 /* під час ведення компас на карті показує, де північ, і перемикає режим «за рухом / північ угорі» */
 
-/* ---------- компактний рядок режимів ---------- */
-.quick { flex-wrap: wrap; }
-.quick .qseg { display: none; }
-.quick.open .qseg { display: flex; }
-.quick.open .mode-chip i { transform: rotate(180deg); }
-.mode-chip {
-  flex: 1 1 100%; display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 36px;
-  background: var(--panel); border: 1px solid var(--border); border-radius: 4px; color: var(--strong);
-  font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
-}
-.mode-chip i { font-style: normal; color: var(--muted); transition: transform .2s; }
-.quick.open .mode-chip { margin-bottom: 0; }
 .p-sub { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 
 /* ---------- розміри для пальця й читабельність надворі ---------- */
-.rec-badge { font-size: 11px; padding: 4px 8px; }
-.pin-label { font-size: 11.5px !important; }
-.map-cmp .mc-deg { font-size: 10.5px; }
 .nav-btns { display: flex; gap: 6px; }
 /* згорнута картка ведення: назва, відстань і маленька стрілка */
 .nav.min .rmode, .nav.min .rmode-info, .nav.min .nav-hint { display: none; }
@@ -563,5 +531,4 @@ body.maprot .rot-attr { display: block; }
 .trk-go button span { font-size: 18px; line-height: 1; }
 .trk-go button:active { background: var(--blue-bg); color: #fff; }
 
-.quick[hidden] { display: none; }
 #envSeg button { font-size: 13px; padding: 9px 2px; }

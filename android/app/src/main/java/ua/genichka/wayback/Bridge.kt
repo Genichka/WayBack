@@ -116,9 +116,4 @@ class Bridge(private val act: MainActivity) {
             try { act.startActivity(Intent.createChooser(send, title)) } catch (e: Exception) { /* */ }
         }
     }
-
-    @JavascriptInterface
-    fun appVersion(): String = try {
-        act.packageManager.getPackageInfo(act.packageName, 0).versionName ?: ""
-    } catch (e: Exception) { "" }
 }

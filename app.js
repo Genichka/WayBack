@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.29.0';
+const APP_VERSION = '1.29.1';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -1601,15 +1601,9 @@ function refreshReturn() {
 
 
 /* ---------- спосіб пересування ---------- */
-function syncTravSeg() {
-  document.querySelectorAll('#travSeg button').forEach((b) =>
-    b.classList.toggle('on', b.dataset.t === S.settings.travel));
-  if ($('#modeChipTxt')) syncModeChip();
-}
 function setTravel(id, silent) {
-  if (!TRAVEL[id] || id === S.settings.travel) { syncTravSeg(); return; }
+  if (!TRAVEL[id] || id === S.settings.travel) return;
   S.settings.travel = id; saveSettings();
-  syncTravSeg();
   if (S.track && S.nrecOk) nativeRecStart();
   if (isRoadMode(S.settings.rmode)) {      // маршрут рахувався іншим профілем - перебудувати
     S.rpath = null; S.rsrc = null; S.rpathLen = null; S.rpathFrom = null;
@@ -1618,17 +1612,8 @@ function setTravel(id, silent) {
   updateAll();
   if (!silent) toast(`${TRAV().ico} ${TRAV().name} — ${TRAV().info}`, 'good');
 }
-document.addEventListener('click', (e) => {
-  const b = e.target.closest('#travSeg button');
-  if (b) setTravel(b.dataset.t);
-});
 
 /* ---------- профіль середовища ---------- */
-function syncProfSeg() {
-  document.querySelectorAll('#profSeg button').forEach((b) =>
-    b.classList.toggle('on', b.dataset.p === S.settings.profile));
-  if ($('#modeChipTxt')) syncModeChip();
-}
 function setProfile(id, silent) {
   if (!PROFILES[id]) return;
   const p = PROFILES[id];
@@ -1639,13 +1624,8 @@ function setProfile(id, silent) {
   const want = (S.settings.rmodeBy || {})[id] || p.rmode || 'track';
   if (want !== S.settings.rmode) setReturnMode(want, true);
   syncModeSeg();
-  syncProfSeg();
   if (!silent) toast(`${p.ico} ${p.name} — ${p.info}`, "good");
 }
-document.addEventListener('click', (e) => {
-  const b = e.target.closest('#profSeg button');
-  if (b) setProfile(b.dataset.p);
-});
 
 /* ---------- navigation / stats ---------- */
 function updateAll() {
@@ -1851,25 +1831,7 @@ function syncModeSeg() {
   });
 }
 syncModeSeg();
-syncProfSeg(); syncTravSeg();
 
-/* Де ти і як рухаєшся міняють раз за прогулянку, тож на головному екрані -
-   один короткий рядок «🏙️ Місто · 🚶 Пішки ▾». Торкнувся - відкриваються перемикачі,
-   обрав - знову згортаються і карта отримує місце назад. */
-function syncModeChip() {
-  const p = PROF(), t = TRAV();
-  $('#modeChipTxt').textContent = `${p.ico} ${p.name} · ${t.ico} ${t.name}`;
-}
-function setModesOpen(open) {
-  $('#quick').classList.toggle('open', open);
-  $('#modeChip').setAttribute('aria-expanded', String(open));
-  setTimeout(() => { try { map.invalidateSize(); } catch (e) { /* */ } }, 50);
-}
-$('#modeChip').onclick = () => setModesOpen(!$('#quick').classList.contains('open'));
-$('#quick').addEventListener('click', (e) => {
-  if (e.target.closest('#profSeg button, #travSeg button')) setTimeout(() => { syncModeChip(); setModesOpen(false); }, 250);
-});
-syncModeChip();
 
 function buildTicks() {
   let s = '';
@@ -2636,15 +2598,11 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden) chec
 /* ---------- підказка для новачка ---------- */
 function syncHelp() {
   const box = $('#helpBox');
-  if (!box) return;
-  const used = S.points.length || S.tracks.length || S.track;
-  box.open = false;                 // для новачка є вікно при першому запуску; тут - довідка на потім
-  void used;
+  if (box) box.open = false;        // для новачка є вікно при першому запуску; тут - довідка на потім
 }
 async function firstRun() {
   if (LS.get('seen', false)) return;
   LS.set('seen', true);
-  LS.set('helpSeen', true);
   await modal({
     title: 'Привіт! Як це працює',
     cancel: '',
@@ -2654,7 +2612,7 @@ async function firstRun() {
         <li><b>Натисни «Старт»</b> і йди. Додаток пише твій слід.</li>
         <li><b>Натисни «Назад»</b> — стрілка й лінія приведуть до точки.</li>
       </ol>
-      <p class="note">У меню згори обери, де ти: місто, ліс чи гори — під це підлаштується карта й спосіб повернення.</p>`,
+      <p class="note">Де ти — місто, ліс чи гори — додаток визначає сам, і під це підлаштовує карту й спосіб повернення. Якщо помилиться — Меню → Інше → «Де ти».</p>`,
     validate: () => true,
   });
 }
