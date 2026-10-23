@@ -48,7 +48,7 @@
   </button>
 </section>
 
-<section class="quick" id="quick">
+<section class="quick" id="quick" hidden>
   <button class="mode-chip" id="modeChip" aria-expanded="false"><span id="modeChipTxt">—</span><i>▾</i></button>
   <div class="seg qseg" id="profSeg" aria-label="Де ти зараз">
     <button data-p="city"><span>🏙️</span>Місто</button>
@@ -92,6 +92,12 @@
         <button class="icon-btn" id="tcClose" title="Сховати слід" aria-label="Сховати слід">✕</button>
       </div>
       <div class="trk-sum" id="tcSum"></div>
+      <div class="trk-go" id="tcGo">
+        <button data-go="start" title="Повернутись туди, де почав запис"><span>🏁</span>На старт</button>
+        <button data-go="back" title="Назад тим самим шляхом, по лінії сліду"><span>↩️</span>По сліду назад</button>
+        <button data-go="again" title="Пройти маршрут ще раз від початку до кінця"><span>↪️</span>Пройти ще раз</button>
+        <button data-go="end" title="До місця, де зупинив запис"><span>🎯</span>До кінця</button>
+      </div>
       <button class="trk-toggle" id="tcMore">▴ Усі характеристики</button>
       <div class="trk-full hidden" id="tcFull"></div>
     </div>
@@ -232,6 +238,16 @@
       </ol>
       <p class="note">Без інтернету все працює, якщо заздалегідь завантажити карту району — вкладка «Карта».</p>
       </details>
+
+      <div class="sec-title">Де ти</div>
+      <p class="note">Місто, ліс чи гори WayBack визначає сам за картою навколо (а гори — ще й за висотою). Від цього залежать карта в режимі «Авто» і спосіб повернення. Обирай вручну, лише якщо він помиляється.</p>
+      <div class="seg" id="envSeg" aria-label="Де ти">
+        <button data-e="auto"><span>✨</span> Авто</button>
+        <button data-e="city"><span>🏙️</span> Місто</button>
+        <button data-e="forest"><span>🌲</span> Ліс</button>
+        <button data-e="mount"><span>⛰️</span> Гори</button>
+      </div>
+      <p class="note" id="envNow"></p>
 
       <div class="sec-title">Під час прогулянки</div>
       <div class="list">

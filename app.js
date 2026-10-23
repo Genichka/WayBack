@@ -1,7 +1,7 @@
 /* WayBack — повернись на точку. PWA, працює онлайн і офлайн. */
 'use strict';
 
-const APP_VERSION = '1.27.0';
+const APP_VERSION = '1.29.0';
 const $ = (s) => document.querySelector(s);
 // Android-додаток (WebView) підкладає window.WayBackNative; у браузері його немає
 const NATIVE = typeof window.WayBackNative !== 'undefined';
@@ -96,6 +96,8 @@ const S = {
     }
     // v5: запис більше не починається сам. Хто хоче - увімкне вручну в «Інше».
     if (!(st.v >= 5)) { st.autorec = false; st.v = 5; }
+    // v6: середовище й карта - автоматично; пересування - за швидкістю
+    if (!(st.v >= 6)) { st.envMode = 'auto'; st.layerAuto = true; st.v = 6; }
     return st;
   })(),
   points: LS.get('points', []),
@@ -386,6 +388,8 @@ function onPos(p) {
   if (S.firstFix) { S.firstFix = false; map.setView(ll, Math.max(map.getZoom(), 16)); }
   else if (S.follow) { if (S.navOpen && target()) navFrame(); else map.panTo(ll, { animate: true }); }
 
+  autoTravelLive(p, ll);
+  envDetect(false);
   if (S.pendingStart && a <= 50) { S.pendingStart = false; startTrack(); }
   autoRecord();
   recordPoint();
@@ -525,7 +529,8 @@ const drawLiveSoon = () => { if (!liveDrawT) liveDrawT = requestAnimationFrame(d
 function nativeRecStart() {
   S.nrecOk = false;
   if (!NREC || !S.track) return false;
-  try { S.nrecOk = !!WayBackNative.recStart(S.track.id, Math.max(PROF().minStep, TRAV().minStep || 0), PROF().maxAcc); } catch (e) { S.nrecOk = false; }
+  // крок пішки - 4 м; швидше Android сам пише рідше (у машині 10 м), повороти - густо
+  try { S.nrecOk = !!WayBackNative.recStart(S.track.id, 4, PROF().maxAcc); } catch (e) { S.nrecOk = false; }
   return S.nrecOk;
 }
 /** Забрати нові точки, які записав Android (у т.ч. поки екран був вимкнений). */
@@ -586,7 +591,7 @@ function recordPoint() {
   if (last) {
     const d = dist(last, cur), dt = (cur[2] - last[2]) / 1000;
     const inTurn = tr.turnI != null && tr.turnI < TURN_STEPS.length;
-    const step = inTurn ? TURN_STEPS[tr.turnI] : Math.max(PROF().minStep, TRAV().minStep, p.acc * 0.4);
+    const step = inTurn ? TURN_STEPS[tr.turnI] : Math.max(speedStep(p.speed), p.acc * 0.4);
     const turn = d >= 1 && isTurn(tr, last, cur, d, p);
     if (d < step && !turn) return;
     // Стрибок GPS - це НЕМОЖЛИВА швидкість, а не просто швидка.
@@ -612,11 +617,8 @@ function startTrack(silent) {
     if (silent) return;
     S.pendingStart = true; toast('Чекаю сигнал GPS…'); updateTrackBtn(); return;
   }
-  if (!silent && !target() && S.settings.auto) {
-    const had = S.points.some((x) => x.icon === '🚗' && isTemp(x));
-    const pt = placeCar(S.pos.lat, S.pos.lon);
-    toast(had ? `🚗 «${pt.name}» перенесено сюди` : `🚗 Точку «${pt.name}» позначено`, 'good');
-  }
+  if (!silent && S.settings.auto) autoStartPoint();
+  if (!silent) envDetect(true);
   if (!silent) S.autoOff = false;
   S.stillAt = null;
   S.track = { id: 't' + Date.now(), start: Date.now(), pts: [], dist: 0, target: target() ? target().name : null,
@@ -763,14 +765,14 @@ function updateTrackBtn() {
 /* ---------- points ---------- */
 function addPoint({ name, icon, lat, lon }, makeTarget) {
   const p = { id: 'p' + Date.now() + Math.floor(Math.random() * 1000), name: name || 'Точка', icon: icon || '📍', lat: +lat.toFixed(6), lon: +lon.toFixed(6), t: Date.now() };
-  p.kind = (p.icon === '🚗' || p.icon === '👤') ? 'temp' : 'place';
+  p.kind = (p.icon === '🚗' || p.icon === '👤' || p.icon === '🏁') ? 'temp' : 'place';
   if (S.track) p.trk = S.track.id;                    // поставлена під час цієї прогулянки
   S.points.push(p);
   if (makeTarget || !S.targetId) S.targetId = p.id;
   savePoints(); renderPoints(); renderPointList(); updateAll();
   return p;
 }
-function setTarget(id) { S.targetId = id; S.arrived = false; S.wentFar = false; savePoints(); renderPoints(); renderPointList(); updateAll(); }
+function setTarget(id) { if (id !== S.targetId) S.guideTr = null; S.targetId = id; S.arrived = false; S.wentFar = false; savePoints(); renderPoints(); renderPointList(); updateAll(); }
 
 const EMOJIS = ['🚗', '🍄', '🏠', '⛺', '🌲', '💧', '⭐', '📍', '⚠️', '🎣'];
 /* Підпис до кожного значка. Обрав гриб - назва стає «Гриб», а не лишається «Машина». */
@@ -1030,7 +1032,16 @@ function pointActions(id) {
     },
   });
 }
-map.on('contextmenu', (e) => newPointDialog(e.latlng.lat, e.latlng.lng));
+map.on('contextmenu', (e) => {
+  const tr = S.shownTrackId && S.tracks.find((x) => x.id === S.shownTrackId);
+  if (tr) {
+    const pts = tr.pts.filter(Boolean).map((p) => [p[0], p[1]]);
+    const at = nearestOnPath(pts, [e.latlng.lat, e.latlng.lng]);
+    const px = map.latLngToContainerPoint(at.pt).distanceTo(e.containerPoint);
+    if (px <= 28) { trackSpotDialog(tr, at); return; }   // натиснув на лінію сліду
+  }
+  newPointDialog(e.latlng.lat, e.latlng.lng);
+});
 
 $('#pointList').onclick = async (e) => {
   const g = e.target.closest('[data-grp]');
@@ -1121,6 +1132,8 @@ function thin(pts, min) {
  *  що починається біля цілі. */
 function returnTrack() {
   const t = target();
+  // ведемо по треку з архіву: pts уже складені так, що ціль - їхня перша точка
+  if (S.guideTr && S.guideTr.pts && S.guideTr.pts.length > 1) return { pts: S.guideTr.pts };
   if (S.track && S.track.pts.length > 3) return S.track;
   if (!t) return null;
   for (const tr of S.tracks) {
@@ -1620,9 +1633,8 @@ function setProfile(id, silent) {
   if (!PROFILES[id]) return;
   const p = PROFILES[id];
   S.settings.profile = id;
-  S.settings.layer = p.layer;
+  if (S.settings.layerAuto !== false) { S.settings.layer = p.layer; setLayer(p.layer); }   // карта сама - лише в «Авто»
   saveSettings();
-  setLayer(p.layer);
   if (S.track && S.nrecOk) nativeRecStart();
   const want = (S.settings.rmodeBy || {})[id] || p.rmode || 'track';
   if (want !== S.settings.rmode) setReturnMode(want, true);
@@ -1648,7 +1660,11 @@ function updateAll() {
   const usePath = S.navOpen && t && here && S.settings.rmode !== 'direct' && S.rpath && S.rpath.length > 1;
   if (usePath) {
     const at = nearestOnPath(S.rpath, here);
-    S.rpathAt = at.i; S.rOff = at.d > 50;
+    const offLim = S.rsrc === 'track' ? 30 : 50;          // по сліду в лісі - суворіше
+    const wasOff = S.rOff;
+    S.rpathAt = at.i; S.rOff = at.d > offLim;
+    if (S.rOff && !wasOff && !S.offWarned) { S.offWarned = true; vibrate([120, 80, 120]); toast(`↪️ Ти зійшов зі сліду на ${Math.round(at.d)} м — зеленим показано, як повернутись`, 'warn'); }
+    else if (!S.rOff && at.d < offLim * 0.6) S.offWarned = false;
     d = at.d + restLen(S.rpath, at);
     b = bearing(here, pointAhead(S.rpath, at, 30));
     // короткий поводок від мене до маршруту, якщо я осторонь від нього
@@ -1786,6 +1802,11 @@ function renderNav() {
   // тут лише напрям; що з маршрутом - пише один рядок під перемикачем режимів
   let sub = `азимут ${Math.round(S.navBearing)}° · ${dirName(S.navBearing)}`;
   if (m !== 'direct' && S.rpath && S.navStraight != null) sub += ` · навпростець ${fmtDist(S.navStraight)}`;
+  if (S.navDist != null && !S.arrived) {               // скільки йти: пішки ~4,5 км/год, в авто ~35
+    const v = S.settings.travel === 'car' ? 35 : (S.settings.profile === 'mount' ? 3 : 4.5);
+    const min = Math.max(1, Math.round(S.navDist / 1000 / v * 60));
+    sub += ` · ≈ ${min < 60 ? min + ' хв' : Math.floor(min / 60) + ' год ' + (min % 60) + ' хв'}`;
+  }
   $('#navSub').textContent = sub;
   const info = $('#rmodeInfo');
   if (info) {
@@ -2019,7 +2040,7 @@ function closeNav() {
   // ведення скінчилось - лінію прибираємо, точка лишається
   if (routeAbort) { routeAbort.abort(); routeAbort = null; }
   S.rpath = null; S.rsrc = null; S.rpathLen = null; S.rpathFrom = null; S.rErr = null;
-  S.noLine = false; S.rVia = null; S.rSnap = 0; S.rOff = false; S.altBase = null;
+  S.noLine = false; S.rVia = null; S.rSnap = 0; S.rOff = false; S.altBase = null; S.guideTr = null; S.offWarned = false;
   drawReturn(); updateAll();
   if (!S.track) wake(false);
 }
@@ -2383,8 +2404,21 @@ function renderMapTab() {
 }
 $('#shareBtn').onclick = shareHere;
 $('#fabLayer').onclick = () => {
-  const keys = Object.keys(LAYERS), next = keys[(keys.indexOf(S.settings.layer) + 1) % keys.length];
-  setLayer(next); toast('Карта: ' + LAYERS[next].name);
+  // коло: Авто → Схема → Топо → Супутник → Деталь → Гібрид → Темна → Авто
+  const keys = Object.keys(LAYERS);
+  if (S.settings.layerAuto !== false) {
+    S.settings.layerAuto = false; saveSettings();
+    setLayer(keys[0]); toast(`Карта: ${LAYERS[keys[0]].name} (вручну)`);
+    return;
+  }
+  const i = keys.indexOf(S.settings.layer);
+  if (i === keys.length - 1) {
+    S.settings.layerAuto = true; saveSettings();
+    const l = PROF().layer; setLayer(l);
+    toast(`Карта: ✨ Авто — зараз «${LAYERS[l].name}» (${PROF().ico} ${PROF().name})`, 'good');
+    return;
+  }
+  setLayer(keys[i + 1]); toast(`Карта: ${LAYERS[keys[i + 1]].name} (вручну)`);
 };
 
 /** Прибрати намальоване: поточний слід і побудований шлях назад.
@@ -3166,7 +3200,7 @@ $('#rpDim').onclick = (e) => {
 const TEMP_DAYS = 7, DONE_HOURS = 2, SAME_R = 30, PT_TRASH_DAYS = 30;
 const GROUP_NAME = { '🍄': 'Гриби', '🏠': 'Дім', '⛺': 'Табори', '🌲': 'Ліс', '💧': 'Вода', '⭐': 'Цікаве',
                      '📍': 'Точки', '⚠️': 'Небезпека', '🎣': 'Риболовля' };
-const isTemp = (p) => (p.kind ? p.kind === 'temp' : (p.icon === '🚗' || p.icon === '👤' || p.auto === 'car'));
+const isTemp = (p) => (p.kind ? p.kind === 'temp' : (p.icon === '🚗' || p.icon === '👤' || p.icon === '🏁' || p.auto === 'car'));
 const fmtDay = (t) => new Date(t).toLocaleDateString('uk-UA', { day: '2-digit', month: '2-digit' });
 S.ptTrash = LS.get('ptTrash', []).filter((p) => Date.now() - (p.deletedAt || 0) < PT_TRASH_DAYS * 864e5);
 S.grpOpen = LS.get('grpOpen', {});
@@ -3333,6 +3367,204 @@ async function cleanPoints() {
   const n = trashPoints(ids);
   toast(`🧹 Прибрано: ${n}. Повернути можна з кошика точок`, 'good');
 }
+
+/* ---------- трек з архіву як маршрут: на старт, по сліду назад, ще раз, до кінця ----------
+   Кожен збережений трек - готовий маршрут. Ціль - 🏁 (тимчасова, одна на всіх: переноситься,
+   а не множиться). «По сліду» веде самою лінією треку (режим «Моїм треком»), «На старт» і
+   «До кінця» - як обереш у картці ведення (пряма, слід, дороги). Записувати новий трек не треба. */
+const FLAG = '🏁';
+function placeFlag(name, lat, lon) {
+  let p = S.points.find((x) => x.icon === FLAG && isTemp(x));
+  if (p) { p.lat = +lat.toFixed(6); p.lon = +lon.toFixed(6); p.t = Date.now(); p.name = name; delete p.done; }
+  else { p = addPoint({ name, icon: FLAG, lat, lon }, false); }
+  savePoints();
+  return p;
+}
+function goTrack(tr, how) {
+  const pts = (tr.pts || []).filter(Boolean);
+  if (pts.length < 2) { toast('У треку замало точок', 'warn'); return; }
+  const toEnd = how === 'again' || how === 'end';
+  const q = toEnd ? pts[pts.length - 1] : pts[0];
+  const day = fmtDay(tr.start);
+  const p = placeFlag(toEnd ? `Кінець маршруту ${day}` : `Старт маршруту ${day}`, q[0], q[1]);
+  if (S.navOpen) closeNav();
+  S.targetId = p.id; S.arrived = false; S.wentFar = false;
+  // уперед = той самий трек навпаки: тоді «назад по треку до його початку» веде до кінця
+  S.guideTr = { id: tr.id, pts: toEnd ? pts.slice().reverse() : pts };
+  savePoints(); renderPoints(); renderPointList();
+  if (how === 'back' || how === 'again') setReturnMode('track', true);   // самою лінією сліду
+  openNav();
+  const what = { start: 'на старт маршруту', back: 'назад по сліду до старту', again: 'маршрутом ще раз — до його кінця', end: 'до кінця маршруту' }[how];
+  toast(`${FLAG} Веду ${what}`, 'good');
+}
+$('#tcGo').onclick = (e) => {
+  const b = e.target.closest('[data-go]'); if (!b) return;
+  const tr = S.tracks.find((x) => x.id === S.shownTrackId); if (!tr) return;
+  goTrack(tr, b.dataset.go);
+};
+/** Довго натиснув на лінію сліду - вести саме сюди. */
+async function trackSpotDialog(tr, at) {
+  const pts = tr.pts.filter(Boolean), i = Math.min(at.i, pts.length - 1);
+  const when = pts[i] && pts[i][2] ? fmtTime(pts[i][2]) : '';
+  const res = await modal({
+    title: 'Це місце на сліді',
+    html: `<p class="note" style="font-size:14px;color:var(--text)">Ти був тут${when ? ' о ' + when : ''}.</p>
+      <div class="row-btns" style="flex-direction:column">
+        <button class="btn primary" data-v="lead">🧭 Вести сюди</button>
+        <button class="btn" data-v="trail">👣 Вести сюди по сліду</button>
+        <button class="btn" data-v="point">📍 Поставити тут точку</button>
+      </div>`,
+    ok: null, cancel: 'Скасувати',
+    onOpen: (b) => { $('#mOk').style.display = 'none'; b.querySelectorAll('[data-v]').forEach((x) => { x.onclick = () => { b.dataset.pick = x.dataset.v; $('#mOk').click(); }; }); },
+    validate: (b) => b.dataset.pick || null,
+  });
+  $('#mOk').style.display = '';
+  if (!res) return;
+  if (res === 'point') { newPointDialog(at.pt[0], at.pt[1]); return; }
+  const p = placeFlag(`Місце зі сліду ${fmtDay(tr.start)}`, at.pt[0], at.pt[1]);
+  if (S.navOpen) closeNav();
+  S.targetId = p.id; S.arrived = false; S.wentFar = false;
+  if (res === 'trail') {
+    // слід, що «починається» в цьому місці: якщо ти далі по треку - його кінець до місця,
+    // якщо ближче до початку - початок, розвернутий до місця
+    const me = S.pos ? nearestOnPath(pts.map((q) => [q[0], q[1]]), [S.pos.lat, S.pos.lon]).i : pts.length - 1;
+    S.guideTr = { id: tr.id, pts: me >= i ? pts.slice(i) : pts.slice(0, i + 1).reverse() };
+    setReturnMode('track', true);
+  }
+  savePoints(); renderPoints(); renderPointList();
+  openNav();
+}
+/** «Старт» без цілі поруч: забути поставити точку тепер неможливо. */
+function autoStartPoint() {
+  const t = target(), here = [S.pos.lat, S.pos.lon];
+  if (!t) {
+    const had = S.points.some((x) => x.icon === '🚗' && isTemp(x));
+    const pt = placeCar(here[0], here[1]);
+    toast(had ? `🚗 «${pt.name}» перенесено сюди` : `🚗 Точку «${pt.name}» позначено`, 'good');
+    return;
+  }
+  const far = dist(here, [t.lat, t.lon]);
+  if (far <= 100) return;                             // ціль поруч - усе гаразд
+  const stale = isTemp(t) && t.icon === '🚗' && (t.done || Date.now() - (t.t || 0) > 6 * 36e5);
+  if (stale) {                                        // учорашня машина - машина тепер тут
+    const pt = placeCar(here[0], here[1]);
+    toast(`🚗 «${pt.name}» перенесено сюди — стара позначка була за ${fmtDist(far)}`, 'good');
+    return;
+  }
+  // ціль свідома (машина недавно, гриб, точка від друга) - лишаємо, а старт позначаємо окремо
+  const f = placeFlag('Старт запису', here[0], here[1]);
+  toast(`🎯 Ціль лишилась «${t.name}» (${fmtDist(far)}). Тут позначено ${FLAG} «${f.name}»`, 'good');
+}
+
+/* ---------- автоматика: де ти і як рухаєшся ----------
+   Перемикачів на головному екрані більше немає.
+   • Пересування - за швидкістю. Пішки → машина швидко (20 с понад 15 км/год). Машина → пішки
+     важко: 5 хв без жодного ривка понад 12 км/год, відійшов від місця зупинки на 150+ м рівною ходою,
+     і не підключений Android Auto. Затор машину пішоходом не зробить. Місце зупинки - це стоянка:
+     туди переноситься 🚗.
+   • Середовище - за картою OSM навколо (будинки, ліс), гори - ще й за висотою. На старті
+     одразу, далі кожні ~500 м; щоб змінити посеред прогулянки, нове має підтвердитись двічі.
+   • Карта в режимі «Авто» йде за середовищем: місто - «Схема», ліс і гори - «Топо». */
+const speedStep = (sp) => { sp = sp > 0 ? sp : 0; return sp < 1.6 ? 4 : sp < 3 ? 5 : sp < 6 ? 8 : sp < 12 ? 10 : 15; };
+const TRV = { fastSince: 0, lastFastAt: 0, lastFastPos: null, prev: null, sp: [] };
+/** Рівна хода: останні 2 хв швидкість 3–8 км/год і без смикань «стоп-рушай», як у заторі. */
+function walkingSteady(now) {
+  const a = TRV.sp.filter((x) => now - x.t <= 120e3).map((x) => x.v);
+  if (a.length < 20) return false;
+  const m = a.reduce((x, y) => x + y, 0) / a.length;
+  const sd = Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length);
+  const stops = a.filter((v) => v < 0.3).length / a.length;
+  return m >= 0.8 && m <= 2.2 && sd / m < 0.5 && stops < 0.15;
+}
+const carLinked = () => { try { return NATIVE && typeof WayBackNative.carRecording === 'function' && WayBackNative.carRecording(); } catch (e) { return false; } };
+function autoTravelLive(p, ll) {
+  const now = p.timestamp || Date.now(), c = p.coords;
+  let sp = c.speed;
+  if (!(sp >= 0) && TRV.prev && c.accuracy <= 30) {           // телефон швидкості не дав - рахуємо самі
+    const dt = (now - TRV.prev.t) / 1000;
+    if (dt >= 2) sp = dist(TRV.prev.ll, ll) / dt;
+  }
+  if (c.accuracy <= 30 && (!TRV.prev || now - TRV.prev.t >= 2000)) TRV.prev = { t: now, ll };
+  if (!(sp >= 0) || c.accuracy > 40) return;
+  TRV.sp.push({ t: now, v: sp }); if (TRV.sp.length > 400) TRV.sp.splice(0, TRV.sp.length - 400);
+  if (sp >= 3.3) { TRV.lastFastAt = now; TRV.lastFastPos = ll; }
+  if (carLinked() && S.settings.travel !== 'car') { setTravel('car', true); toast('🚗 Android Auto — режим «Машина»', 'good'); return; }
+  if (sp >= 4.2) {
+    if (!TRV.fastSince) TRV.fastSince = now;
+    if (S.settings.travel !== 'car' && now - TRV.fastSince >= 20000) { setTravel('car', true); toast('🚗 Їдеш — режим «Машина»', 'good'); }
+  } else TRV.fastSince = 0;
+  if (S.settings.travel === 'car' && !carLinked() && TRV.lastFastPos && now - TRV.lastFastAt > 5 * 60e3 &&
+      dist(TRV.lastFastPos, ll) > 150 && walkingSteady(now)) {
+    const park = TRV.lastFastPos;
+    setTravel('foot', true);
+    if (S.settings.auto && !S.navOpen) {
+      placeCar(park[0], park[1]);
+      toast('🚶 Пішки. 🚗 Машину позначено там, де ти зупинився', 'good');
+    } else toast('🚶 Пішки', 'good');
+    TRV.lastFastPos = null;
+  }
+}
+const ENV = { busy: false, at: 0, pos: null, pending: null, src: '' };
+function envFromAlt() {
+  const alt = S.pos && S.pos.alt;
+  if (alt != null && alt >= 600) return 'mount';
+  const pts = S.track && S.track.pts ? S.track.pts.slice(-400).map((q) => q[4]).filter((v) => v != null) : [];
+  if (pts.length > 20 && Math.max(...pts) - Math.min(...pts) >= 150) return 'mount';
+  return null;
+}
+async function envFromOsm(lat, lon) {
+  const q = `[out:json][timeout:8];way["building"](around:300,${lat.toFixed(5)},${lon.toFixed(5)});out count;` +
+    `is_in(${lat.toFixed(5)},${lon.toFixed(5)})->.a;(area.a["landuse"="forest"];area.a["natural"="wood"];);out count;`;
+  const ctl = new AbortController(), tm = setTimeout(() => ctl.abort(), 10000);
+  try {
+    const r = await fetch('https://overpass-api.de/api/interpreter?data=' + encodeURIComponent(q), { signal: ctl.signal });
+    if (!r.ok) return null;
+    const j = await r.json(), el = j.elements || [];
+    const n = (k) => +((el[k] && el[k].tags && el[k].tags.total) || 0);
+    return { b: n(0), f: n(1) };
+  } catch (e) { return null; } finally { clearTimeout(tm); }
+}
+async function envDetect(force) {
+  if ((S.settings.envMode || 'auto') !== 'auto' || !S.pos || ENV.busy) return;
+  if (!ENV.pos) force = true;                         // перше визначення за сеанс - одразу
+  const here = [S.pos.lat, S.pos.lon], now = Date.now();
+  if (!force) {
+    if (now - ENV.at < 2 * 60e3) return;
+    if (!ENV.pending && ENV.pos && dist(ENV.pos, here) < 500) return;
+  }
+  ENV.busy = true; ENV.at = now; ENV.pos = here;
+  let env = null;
+  const m = navigator.onLine ? await envFromOsm(here[0], here[1]) : null;
+  if (m) {
+    ENV.src = `будинків поруч ${m.b}${m.f ? ', ти в лісі' : ''}`;
+    if (m.b >= 20) env = 'city';
+    else env = envFromAlt() || (m.f > 0 ? 'forest' : m.b >= 6 ? 'city' : 'forest');
+  } else { env = envFromAlt(); ENV.src = env ? 'за висотою' : ''; }
+  ENV.busy = false;
+  renderEnvNow();
+  if (!env || env === S.settings.profile) { ENV.pending = null; return; }
+  if (!force && ENV.pending !== env) { ENV.pending = env; return; }   // посеред прогулянки - лише після другого підтвердження
+  ENV.pending = null;
+  setProfile(env, true);
+  const p = PROFILES[env];
+  toast(`${p.ico} ${p.name}${S.settings.layerAuto !== false ? ` — карта «${LAYERS[p.layer].name}»` : ''}`, 'good');
+  renderEnvNow();
+}
+function renderEnvNow() {
+  document.querySelectorAll('#envSeg button').forEach((b) => b.classList.toggle('on', b.dataset.e === (S.settings.envMode || 'auto')));
+  const el = $('#envNow'); if (!el) return;
+  const p = PROF(), t = TRAV();
+  el.textContent = `Зараз: ${p.ico} ${p.name} · ${t.ico} ${t.name}` + ((S.settings.envMode || 'auto') === 'auto'
+    ? (ENV.src ? ` (визначено: ${ENV.src})` : ' (визначається автоматично)') : ' (вибрано вручну)');
+}
+$('#envSeg').onclick = (e) => {
+  const b = e.target.closest('[data-e]'); if (!b) return;
+  S.settings.envMode = b.dataset.e; saveSettings();
+  if (b.dataset.e === 'auto') { ENV.at = 0; ENV.pending = null; envDetect(true); toast('✨ Середовище — автоматично', 'good'); }
+  else setProfile(b.dataset.e);
+  renderEnvNow();
+};
+renderEnvNow();
 
 /* ---------- init ---------- */
 migratePoints();
