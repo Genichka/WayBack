@@ -15,6 +15,7 @@ val buildNo: Int = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 1
 val genDir: File = layout.buildDirectory.get().asFile.resolve("generated/wayback")
 val webFiles = listOf(
     "index.html", "style.css", "app.js", "leaflet.js", "leaflet.css", "qr.js",
+    "maplibre-gl.js", "maplibre-gl.css",
     "manifest.webmanifest", "icon-192.png", "icon-512.png", "icon-maskable-512.png",
 )
 

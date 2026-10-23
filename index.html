@@ -87,12 +87,39 @@
     <div class="trk-card">
       <div class="trk-head">
         <div class="trk-title"><div class="p-title">Маршрут з архіву</div><div class="trk-name" id="tcName">—</div></div>
+        <button class="icon-btn rp-open" id="tcPlay" title="Відтворити маршрут" aria-label="Відтворити маршрут">▶</button>
         <button class="icon-btn" id="tcArch" title="До архіву" aria-label="До архіву">☰</button>
         <button class="icon-btn" id="tcClose" title="Сховати слід" aria-label="Сховати слід">✕</button>
       </div>
       <div class="trk-sum" id="tcSum"></div>
       <button class="trk-toggle" id="tcMore">▴ Усі характеристики</button>
       <div class="trk-full hidden" id="tcFull"></div>
+    </div>
+  </div>
+
+  <!-- відтворення маршруту 2D / 3D -->
+  <div class="rp hidden" id="rp" aria-label="Відтворення маршруту">
+    <div id="rpMap"></div>
+    <div class="rp-top">
+      <button class="icon-btn" id="rpClose" title="Закрити" aria-label="Закрити відтворення">✕</button>
+      <div class="rp-title"><div class="p-title">Відтворення</div><div class="trk-name" id="rpName">—</div></div>
+      <div class="seg rp-dim" id="rpDim"><button data-d="2" class="on">2D</button><button data-d="3">3D</button></div>
+    </div>
+    <button class="icon-btn rp-fit" id="rpFit" title="Увесь маршрут" aria-label="Показати весь маршрут">⤢</button>
+    <div class="rp-bot">
+      <div class="rp-now">
+        <div><span>Час</span><b id="rpClock">—</b></div>
+        <div><span>Пройдено</span><b id="rpDist">—</b></div>
+        <div><span>Швидкість</span><b id="rpSpd">—</b></div>
+      </div>
+      <input type="range" id="rpSeek" min="0" max="1000" value="0" aria-label="Місце в маршруті">
+      <div class="rp-times"><span id="rpT0">0:00</span><span id="rpT1">0:00</span></div>
+      <div class="rp-ctl">
+        <button class="icon-btn" id="rpBack" title="Назад" aria-label="Перемотати назад">⟲</button>
+        <button class="rp-play" id="rpPlay" aria-label="Відтворити">▶</button>
+        <button class="icon-btn" id="rpFwd" title="Вперед" aria-label="Перемотати вперед">⟳</button>
+        <button class="rp-speed" id="rpSpeed" title="Швидкість відтворення">1×</button>
+      </div>
     </div>
   </div>
 
@@ -107,6 +134,7 @@
         <button data-m="direct" class="on"><span>↗</span>Пряма</button>
         <button data-m="track"><span>👣</span>Моїм треком</button>
         <button data-m="route"><span>🛣️</span>Дорогами</button>
+        <button data-m="alt"><span>🔀</span>Іншою</button>
       </div>
       <div class="rmode-info" id="rmodeInfo"></div>
       <div class="nav-body">
