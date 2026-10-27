@@ -1,0 +1,15 @@
+name: 💡 Ідея
+description: Нова гра, режим чи покращення
+labels: [ідея]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Що додати чи змінити?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Навіщо
+      description: Кому й чим це допоможе (необовʼязково)

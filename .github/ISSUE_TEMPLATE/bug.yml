@@ -1,0 +1,26 @@
+name: 🐞 Щось не працює
+description: Гра зависла, кнопка не реагує, щось виглядає не так
+labels: [помилка]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Що сталося?
+      description: Коротко — що робив і що пішло не так. Скриншот можна просто вставити сюди.
+    validations:
+      required: true
+  - type: input
+    id: where
+    attributes:
+      label: Де саме
+      placeholder: напр. «екран Назад, у режимі Авто»
+  - type: input
+    id: version
+    attributes:
+      label: Версія
+      description: Написана дрібно під назвою вгорі, напр. v1.9.6
+  - type: input
+    id: device
+    attributes:
+      label: Телефон / браузер
+      placeholder: напр. Samsung A54, Chrome

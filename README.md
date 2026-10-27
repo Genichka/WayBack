@@ -1,4 +1,18 @@
+<!-- шапка: бейджі (оновлює Claude) -->
+<p align="center"><a href="https://genichka.github.io/WayBack/"><img src="icon-192.png" width="96" alt="WayBack"></a></p>
+
 # 🧭 WayBack — повернись на точку
+
+<p align="center">
+
+[![🧭 Відкрити](https://img.shields.io/badge/%D0%92%D1%96%D0%B4%D0%BA%D1%80%D0%B8%D1%82%D0%B8-%D0%BE%D0%BD%D0%BB%D0%B0%D0%B9%D0%BD-3d71d9?style=for-the-badge)](https://genichka.github.io/WayBack/) [![версія](https://img.shields.io/badge/dynamic/json?url=https://genichka.github.io/WayBack/version.json&query=%24.version&label=%D0%B2%D0%B5%D1%80%D1%81%D1%96%D1%8F&color=73bf69&style=for-the-badge)](https://genichka.github.io/WayBack/) [![APK](https://img.shields.io/badge/APK-%D0%B7%D0%B0%D0%B2%D0%B0%D0%BD%D1%82%D0%B0%D0%B6%D0%B8%D1%82%D0%B8-ff9830?style=for-the-badge&logo=android&logoColor=white)](https://github.com/Genichka/WayBack/releases/download/apk-latest/WayBack.apk) [![оновлено](https://img.shields.io/github/last-commit/Genichka/WayBack?label=%D0%BE%D0%BD%D0%BE%D0%B2%D0%BB%D0%B5%D0%BD%D0%BE&style=for-the-badge&color=8e8e9e)](https://github.com/Genichka/WayBack/commits/main) [![EnergyUA](https://img.shields.io/badge/YouTube-EnergyUA-f2495c?style=for-the-badge&logo=youtube&logoColor=white)](https://www.youtube.com/@YevhenShchuka)
+
+</p>
+
+> Повернись на точку: для грибників, мисливців і туристів. Компас, трек, офлайн-карти, Android Auto.
+>
+> 💬 Ідеї, питання й помилки — у [Обговореннях](https://github.com/Genichka/WayBack/discussions) або [Issues](https://github.com/Genichka/WayBack/issues/new/choose).
+<!-- /шапка -->
 
 Веб-додаток (PWA) для грибників, мисливців і туристів: вийшов з машини → «Старт» → гуляєш лісом → «Назад» і йдеш за стрілкою.
 Працює онлайн і офлайн, встановлюється на телефон як звичайний застосунок.
