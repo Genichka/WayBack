@@ -35,6 +35,29 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      # Ключ підпису з Secrets (Settings → Secrets and variables → Actions):
+      # WB_KEYSTORE_B64 - файл ключа в base64, WB_STORE_PASS, WB_KEY_ALIAS, WB_KEY_PASS.
+      # Якщо секретів ще немає - gradle візьме старий android/app/wayback.keystore.
+      - name: Signing key from secrets
+        env:
+          KS_B64: ${{ secrets.WB_KEYSTORE_B64 }}
+          STORE_PASS: ${{ secrets.WB_STORE_PASS }}
+          KEY_ALIAS: ${{ secrets.WB_KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.WB_KEY_PASS }}
+        run: |
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > "$RUNNER_TEMP/wb.keystore"
+            {
+              echo "WB_KEYSTORE=$RUNNER_TEMP/wb.keystore"
+              echo "WB_STORE_PASS=$STORE_PASS"
+              echo "WB_KEY_ALIAS=$KEY_ALIAS"
+              echo "WB_KEY_PASS=$KEY_PASS"
+            } >> "$GITHUB_ENV"
+            echo "Підпис: ключ із Secrets"
+          else
+            echo "::warning::Секрет WB_KEYSTORE_B64 не задано - підпис старим ключем з репозиторію"
+          fi
+
       - name: Build APK
         working-directory: android
         run: gradle assembleDebug --stacktrace

@@ -44,12 +44,14 @@ android {
     }
 
     signingConfigs {
+        // Ключ підпису: з GitHub Secrets (збірка в Actions кладе його у WB_KEYSTORE і паролі в змінні середовища).
+        // Поки секретів немає - старий файл wayback.keystore з репозиторію, щоб збірка не зламалась.
         create("wayback") {
-            storeFile = file("wayback.keystore")
+            storeFile = file(System.getenv("WB_KEYSTORE") ?: "wayback.keystore")
             storeType = "pkcs12"
-            storePassword = "wayback"
-            keyAlias = "wayback"
-            keyPassword = "wayback"
+            storePassword = System.getenv("WB_STORE_PASS") ?: "wayback"
+            keyAlias = System.getenv("WB_KEY_ALIAS") ?: "wayback"
+            keyPassword = System.getenv("WB_KEY_PASS") ?: "wayback"
         }
     }
 
