@@ -34,19 +34,23 @@
 </div>
 <script>
 /* Заставка EnergyUA: раз на запуск (у тій самій вкладці після «Оновити» чи перезавантаження — ні), інтро зі звуком, якщо браузер дозволяє;
-   далі картка з QR. Без інтернету відео не завантажиться — картка зʼявиться одразу. ?nosplash — без заставки. */
+   далі картка з QR. Без інтернету відео не завантажиться — картка зʼявиться одразу. ?nosplash — без заставки.
+   euaQR() — відкрити картку з QR ще раз (кнопка «📱 QR» у застосунку). */
 (function(){ var el=document.getElementById("euaSpl"); if(!el) return; var v=document.getElementById("euaV"), card=document.getElementById("euaCard"), skip=false;
   try{ var u=new URL(location.href); skip=u.searchParams.has("nosplash")||(navigator.webdriver&&!u.searchParams.has("splash"))||sessionStorage.getItem("euaSpl")==="1"; sessionStorage.setItem("euaSpl","1"); }catch(e){}
-  if(skip){ el.remove(); return; }
-  function close(){ if(el.classList.contains("out")) return; el.classList.add("out"); try{ v.pause(); }catch(e){} document.removeEventListener("keydown",key); setTimeout(function(){ el.remove(); },380); }
+  function stopV(){ try{ v.pause(); if(v.getAttribute("src")){ v.removeAttribute("src"); v.load(); } }catch(e){} }
+  function close(){ if(el.hidden||el.classList.contains("out")) return; el.classList.add("out"); document.removeEventListener("keydown",key); setTimeout(function(){ el.hidden=true; el.classList.remove("out"); stopV(); },380); }
   function showCard(){ if(el.classList.contains("card")) return; el.classList.add("card"); card.setAttribute("aria-hidden","false"); setTimeout(function(){ try{ v.pause(); }catch(e){} },500); }
   function key(e){ if(e.key==="Escape") close(); }
   function note(t){ var n=document.createElement("div"); n.className="eua-toast"; n.textContent=t; el.appendChild(n); setTimeout(function(){ n.remove(); },2600); }
-  document.addEventListener("keydown",key);
+  window.euaQR=function(){ stopV(); el.classList.add("card"); card.setAttribute("aria-hidden","false"); el.hidden=false; document.addEventListener("keydown",key); };
   document.getElementById("euaSkipV").onclick=close; document.getElementById("euaSkip").onclick=close;
+  el.addEventListener("click",function(e){ if(e.target===el&&el.classList.contains("card")) close(); });
   document.getElementById("euaShare").onclick=function(){ var url="https://genichka.github.io/WayBack/", d={title:"WayBack",text:"WayBack — повернись на точку: грибникам, туристам, мандрівникам",url:url};
     if(navigator.share){ navigator.share(d).catch(function(){}); return; }
     if(navigator.clipboard) navigator.clipboard.writeText(url).then(function(){ note("Посилання скопійовано — надішли його друзям"); },function(){ note(url); }); else note(url); };
+  if(skip){ el.hidden=true; stopV(); return; }
+  document.addEventListener("keydown",key);
   v.addEventListener("ended",showCard); v.addEventListener("error",showCard); setTimeout(showCard,6000);
   try{ v.muted=false; var p=v.play(); if(p&&p.catch) p.catch(function(){ v.muted=true; var q=v.play(); if(q&&q.catch) q.catch(showCard); }); }catch(e){ showCard(); }
 })();
@@ -311,11 +315,10 @@
           <div class="i-main"><b id="updVer">WayBack</b><small id="updSub2">—</small></div>
         </div>
       </div>
-      <div class="app-qr">
-        <a class="qr" href="https://github.com/Genichka/WayBack/releases/download/apk-latest/WayBack.apk" target="_blank" rel="noopener"><svg width="164" height="164" role="img" aria-label="QR-код: https://github.com/Genichka/WayBack/releases/download/apk-latest/WayBack.apk" shape-rendering="crispEdges" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 41 41"><path fill="#fff" d="M0 0h41v41h-41z"/><path stroke="#111217" d="M2 2.5h7m2 0h5m1 0h2m1 0h1m3 0h2m4 0h1m1 0h7m-37 1h1m5 0h1m2 0h1m3 0h1m1 0h1m1 0h2m1 0h2m3 0h1m1 0h2m1 0h1m5 0h1m-37 1h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m2 0h1m2 0h1m1 0h1m2 0h1m1 0h3m1 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h1m1 0h3m4 0h1m1 0h1m2 0h1m1 0h3m3 0h1m1 0h3m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h2m1 0h1m2 0h1m3 0h3m2 0h1m1 0h1m2 0h1m1 0h1m1 0h3m1 0h1m-37 1h1m5 0h1m1 0h1m1 0h1m1 0h3m3 0h1m1 0h2m4 0h2m2 0h1m5 0h1m-37 1h7m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h1m1 0h7m-29 1h1m1 0h2m4 0h1m1 0h1m2 0h4m3 0h1m-29 1h1m1 0h5m2 0h1m3 0h1m1 0h1m2 0h1m2 0h2m1 0h3m3 0h5m-35 1h2m1 0h1m1 0h1m2 0h3m2 0h8m2 0h1m1 0h1m5 0h1m2 0h2m-32 1h3m1 0h4m5 0h2m6 0h8m1 0h3m-35 1h2m1 0h1m1 0h3m1 0h2m1 0h1m1 0h1m4 0h3m2 0h1m2 0h1m1 0h2m3 0h1m-36 1h1m4 0h1m3 0h1m1 0h1m3 0h3m3 0h1m1 0h3m2 0h2m1 0h5m-36 1h2m1 0h2m1 0h3m1 0h2m3 0h6m1 0h1m7 0h1m-31 1h8m3 0h6m9 0h1m2 0h4m2 0h1m-37 1h2m5 0h1m6 0h2m1 0h3m1 0h1m2 0h1m1 0h1m2 0h4m2 0h1m-35 1h3m2 0h1m4 0h6m3 0h1m1 0h2m1 0h3m1 0h2m1 0h1m1 0h1m1 0h1m-37 1h1m2 0h1m1 0h1m5 0h2m2 0h1m1 0h5m3 0h2m1 0h1m2 0h1m3 0h1m-36 1h1m1 0h3m1 0h1m1 0h3m2 0h5m2 0h2m4 0h2m5 0h1m1 0h2m-36 1h1m1 0h1m5 0h3m3 0h1m5 0h3m2 0h2m1 0h4m3 0h1m-36 1h1m2 0h3m1 0h1m6 0h1m1 0h1m5 0h3m1 0h1m1 0h2m1 0h3m-32 1h1m1 0h1m1 0h6m3 0h1m3 0h2m1 0h1m4 0h2m3 0h1m1 0h1m-36 1h5m1 0h1m1 0h2m5 0h2m1 0h1m1 0h2m2 0h1m1 0h8m1 0h2m-37 1h1m1 0h1m5 0h1m2 0h6m4 0h3m3 0h2m1 0h3m2 0h2m-35 1h1m3 0h1m1 0h5m2 0h1m2 0h2m2 0h7m1 0h1m1 0h1m1 0h3m-37 1h1m1 0h1m1 0h2m1 0h1m1 0h1m3 0h4m2 0h2m2 0h3m2 0h1m2 0h1m2 0h1m-35 1h1m1 0h3m1 0h1m1 0h1m2 0h1m1 0h1m3 0h2m3 0h1m1 0h7m1 0h1m1 0h3m-37 1h1m6 0h1m4 0h3m1 0h1m1 0h5m3 0h2m2 0h3m3 0h1m-37 1h1m2 0h1m1 0h2m1 0h3m2 0h1m3 0h1m1 0h4m1 0h1m1 0h7m1 0h2m-28 1h2m3 0h2m1 0h8m4 0h1m3 0h2m-34 1h7m2 0h1m5 0h1m1 0h1m2 0h1m5 0h1m1 0h1m1 0h1m1 0h1m1 0h3m-37 1h1m5 0h1m1 0h1m5 0h5m2 0h2m3 0h1m1 0h1m3 0h2m1 0h1m-36 1h1m1 0h3m1 0h1m1 0h3m1 0h2m2 0h1m5 0h1m2 0h8m1 0h1m1 0h1m-37 1h1m1 0h3m1 0h1m1 0h2m2 0h4m2 0h2m1 0h1m1 0h1m2 0h2m1 0h2m1 0h1m3 0h1m-37 1h1m1 0h3m1 0h1m1 0h2m1 0h2m1 0h3m3 0h1m1 0h1m2 0h4m5 0h3m-37 1h1m5 0h1m2 0h1m1 0h1m3 0h1m3 0h1m1 0h4m1 0h4m2 0h1m3 0h1m-37 1h7m1 0h1m1 0h1m3 0h2m1 0h1m1 0h1m2 0h1m1 0h3m2 0h1m2 0h5"/></svg></a>
-        <p class="note">Наведи камеру іншого телефона — завантажиться WayBack для Android</p>
-        <a class="qlink" href="https://github.com/Genichka/WayBack/releases/download/apk-latest/WayBack.apk" target="_blank" rel="noopener">Завантажити WayBack.apk</a>
-        <p class="note tiny">або відкрити в браузері: <a href="https://genichka.github.io/WayBack/" target="_blank" rel="noopener">genichka.github.io/WayBack</a></p>
+      <div class="list">
+        <button class="item" type="button" onclick="euaQR()">
+          <span class="i-ico">📱</span><div class="i-main"><b>QR-код і посилання</b><small>завантажити WayBack на інший телефон, поділитися</small></div>
+        </button>
       </div>
       <input type="file" id="importFile" accept=".json,.gpx,application/json,application/gpx+xml" hidden>
       <p class="note">⚠️ Браузер може зупинити GPS, коли екран вимкнено або додаток згорнуто. Під час прогулянки тримай WayBack відкритим (екран можна не дивитися — він не згасне). Дані зберігаються лише на цьому пристрої.</p>
