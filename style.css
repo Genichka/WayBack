@@ -540,3 +540,28 @@ body.maprot .rot-attr { display: block; }
 .app-qr .note { margin: 2px; }
 .app-qr .qlink { font-size: 13.5px; font-weight: 600; color: var(--blue); text-decoration: none; }
 .app-qr a { color: var(--blue); }
+
+/* ---- Заставка EnergyUA при запуску: інтро → QR застосунку, «Поділитися», група EnergyUA в Telegram, «Пропустити» ---- */
+.eua-spl{position:fixed;inset:0;z-index:2147483000;background:#000;display:grid;place-items:center;overflow:auto;transition:opacity .35s;font-family:Inter,Roboto,"Segoe UI",-apple-system,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+.eua-spl.out{opacity:0;pointer-events:none}
+.eua-spl .eua-v{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000;transition:opacity .45s}
+.eua-spl.card .eua-v{opacity:0}
+.eua-spl .eua-skipv{position:absolute;right:max(16px,env(safe-area-inset-right));bottom:max(18px,env(safe-area-inset-bottom));z-index:2;background:rgba(255,255,255,.08);color:#ccccdc;border:1px solid rgba(204,204,220,.25);border-radius:999px;padding:9px 18px;font:500 14px inherit;font-family:inherit;cursor:pointer}
+.eua-spl.card .eua-skipv{display:none}
+.eua-spl .eua-card{position:relative;z-index:1;width:min(380px,calc(100vw - 32px));margin:24px 0;padding:22px 20px 16px;background:#181b1f;border:1px solid rgba(204,204,220,.2);border-radius:8px;box-shadow:0 8px 24px rgba(1,4,9,.75);color:#ccccdc;
+  display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;opacity:0;transform:translateY(10px);transition:opacity .45s,transform .45s;visibility:hidden}
+.eua-spl.card .eua-card{opacity:1;transform:none;visibility:visible}
+.eua-spl .eua-brand{display:flex;align-items:center;gap:8px;font-size:28px;font-weight:600;line-height:1.1;letter-spacing:-.3px}
+.eua-spl .eua-brand svg{width:22px;height:30px;flex:none} .eua-spl .eua-b1{color:#8e8e9e} .eua-spl .eua-b2{color:#6e9fff}
+.eua-spl .eua-qr{display:block;background:#fff;padding:8px;border-radius:6px;line-height:0} .eua-spl .eua-qr svg{width:min(200px,52vw)!important;height:auto!important;display:block}
+.eua-spl .eua-s{margin:0;color:#8e8e9e;font-size:13px;line-height:1.4}
+.eua-spl .eua-link{color:#6e9fff;font-size:14px;text-decoration:none;word-break:break-all;font-family:"Roboto Mono",ui-monospace,Menlo,Consolas,monospace} .eua-spl .eua-link:hover{text-decoration:underline}
+.eua-spl .eua-alt{margin:-4px 0 0;color:#8e8e9e;font-size:12.5px} .eua-spl .eua-alt a{color:#6e9fff}
+.eua-spl .eua-note{margin:4px 0 0;color:#ccccdc;font-size:14px;line-height:1.45}
+.eua-spl .eua-btn{min-height:44px;padding:8px 16px;border-radius:6px;background:#22252b;color:#ccccdc;border:1px solid rgba(204,204,220,.2);font:500 15px inherit;font-family:inherit;cursor:pointer}
+.eua-spl .eua-btn:hover{background:#2c3037}
+.eua-spl .eua-tg{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;min-height:46px;padding:10px 14px;border-radius:6px;background:#229ed9;color:#fff;font-weight:600;font-size:15px;text-decoration:none}
+.eua-spl .eua-tg:hover{background:#1c8dc3} .eua-spl .eua-tg svg{width:22px;height:22px;flex:none} .eua-spl .eua-tg .u{color:#fade2a}
+.eua-spl .eua-skip{margin-top:4px;width:100%;color:#8e8e9e}
+.eua-spl .eua-toast{position:absolute;left:50%;bottom:max(18px,env(safe-area-inset-bottom));transform:translateX(-50%);background:#22252b;color:#fff;border:1px solid rgba(204,204,220,.25);border-radius:6px;padding:9px 14px;font-size:14px;z-index:3;max-width:calc(100vw - 32px)}
+@media (prefers-reduced-motion:reduce){ .eua-spl,.eua-spl .eua-v,.eua-spl .eua-card{transition:none} }
